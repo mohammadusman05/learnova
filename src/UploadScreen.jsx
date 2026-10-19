@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { graphEngine, exJSON } from './utils.js';
 import { EXTRACT_PROMPT, MERGE_PROMPT, LINKS_PROMPT, stripRepeatedLines, splitIntoParts, combineConcepts, planMerge, conceptDocIds } from './conceptExtraction.js';
+import { extractPdfText, looksScanned } from './pdfText.js';
 const UploadScreen = ({ subject, onUpdate, apiKey }) => {
   const [drag,setDrag]=useState(false);
   const [text,setText]=useState("");
@@ -63,12 +64,20 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
       const reader=new FileReader();
       reader.onload=async(e)=>{
         try{
+          // 1. Read the PDF's own text layer in the browser (same text every time, whole PDF)
+          let local=null;
+          try{ local=await extractPdfText(e.target.result); }catch{ local=null; }
+          if(local && !looksScanned(local.text, local.numPages)){
+            await processText(local.text, file.name, 'PDF');
+            return;
+          }
+          // 2. Scanned PDF (pages are photos, no selectable text) → ask Claude to read it
           // Convert PDF to base64
           const bytes=new Uint8Array(e.target.result);
           let binary="";
           for(let i=0;i<bytes.byteLength;i++) binary+=String.fromCharCode(bytes[i]);
           const b64=btoa(binary);
-          setStep("Extracting text from PDF with AI...");
+          setStep("Scanned PDF — reading pages with AI...");
           // ...
           const res=await fetch("https://api.anthropic.com/v1/messages",{
             method:"POST",
@@ -76,6 +85,7 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
             body:JSON.stringify({
               model:"claude-haiku-4-5-20251001",
               max_tokens:16000,
+              temperature:0,
               messages:[{role:"user",content:[
                 {type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}},
                 {type:"text",text:"Extract all the text content from this PDF document. Return only the raw text, preserving paragraph structure."}
@@ -178,19 +188,30 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
 
       // Parts 2–3 — extract from every part (3 parts at a time)
       const partResults = new Array(parts.length).fill(null);
-      let failedParts = 0, firstError = "";
+      let failedParts = 0, firstError = "", badReply = "";
+      // one part: ask, and if the reply is not a valid concept list, ask once more
+      const extractPart = async(p, idx)=>{
+        for(let attempt=0; attempt<2; attempt++){
+          const raw = await callClaude(EXTRACT_PROMPT, `Part ${idx+1} of ${parts.length}:\n\n${p}`+(attempt?"\n\nReply with the JSON only.":""), 2500, 0);
+          const parsed = exJSON(raw);
+          if(parsed && Array.isArray(parsed.concepts)) return parsed;
+          if(!badReply) badReply = (raw||"(empty reply)").replace(/\s+/g," ").trim().slice(0,160);
+        }
+        return null;
+      };
       for(let i=0;i<parts.length;i+=3){
         setStep(`Extracting concepts (part ${Math.min(i+3,parts.length)} of ${parts.length})...`);
         await Promise.all(parts.slice(i,i+3).map(async(p,j)=>{
           try{
-            const raw = await callClaude(EXTRACT_PROMPT, `Part ${i+j+1} of ${parts.length}:\n\n${p}`, 2500, 0);
-            const parsed = exJSON(raw);
-            if(parsed && Array.isArray(parsed.concepts)) partResults[i+j] = parsed;
+            const parsed = await extractPart(p, i+j);
+            if(parsed) partResults[i+j] = parsed;
             else failedParts++;
           }catch(err){ failedParts++; if(!firstError) firstError = err.message; }
         }));
       }
-      if(failedParts===parts.length) throw new Error(firstError||"Could not extract concepts. Try with more detailed content.");
+      if(failedParts===parts.length) throw new Error(
+        firstError || (badReply ? `Could not extract concepts. Claude replied: "${badReply}…"` : "Could not extract concepts. Try with more detailed content.")
+      );
       const topic = partResults.find(r=>r?.topic)?.topic || "Lecture";
       const found = combineConcepts(partResults).map((c,i)=>({...c, localId:`n${i+1}`}));
       if(!found.length) throw new Error("No concepts found in this content.");
