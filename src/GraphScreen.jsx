@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ME } from './utils.js';
+import { conceptDocIds } from './conceptExtraction.js';
 const KnowledgeGraph = ({ subject, filterDocId }) => {
   const { graph, mastery } = subject;
   // ...
   const allConcepts = Object.values(graph.nodes);
   const concepts = filterDocId
-    ? allConcepts.filter(c => c.sourceDocId === filterDocId)
+    ? allConcepts.filter(c => conceptDocIds(c).includes(filterDocId))
     : allConcepts;
 
   const [selected, setSelected] = useState(null);
@@ -285,7 +286,7 @@ const GraphScreen = ({ subject }) => {
                 <div className="card-label mb10">SELECT DOCUMENT</div>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {docs.map((doc,i)=>{
-                    const conceptCount=Object.values(subject.graph.nodes).filter(c=>c.sourceDocId===doc.id).length;
+                    const conceptCount=Object.values(subject.graph.nodes).filter(c=>conceptDocIds(c).includes(doc.id)).length;
                     const isActive=selectedDocId===doc.id;
                     return(
                       <div key={doc.id} onClick={()=>setSelectedDocId(isActive?null:doc.id)}

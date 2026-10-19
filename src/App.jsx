@@ -72,9 +72,11 @@ const App = () => {
     }catch(e){return {};}
   });
   const [activeSubjectId,setActiveSubjectId]=useState(null);
+  const [saveFailed,setSaveFailed]=useState(false);
   // ...
   useEffect(()=>{
-    try{ localStorage.setItem("learnova_subjects", JSON.stringify(subjects)); }catch(e){}
+    try{ localStorage.setItem("learnova_subjects", JSON.stringify(subjects)); setSaveFailed(false); }
+    catch(e){ setSaveFailed(true); } // usually: browser storage is full
   },[subjects]); // null = subjects home
   const [screen,setScreen]=useState("home"); // home | dashboard | upload | graph | learn | eval
   const [learnId,setLearnId]=useState(null);
@@ -226,6 +228,11 @@ const App = () => {
             </div>
             <div className="live-badge"><div className="live-dot"/>AI Active · {Object.values(subjects).reduce((a,s)=>a+Object.keys(s.graph.nodes).length,0)} Concepts</div>
           </div>
+          {saveFailed&&(
+            <div style={{margin:"12px 24px 0",padding:"10px 14px",borderRadius:10,border:"1px solid #fca5a5",background:"#fef2f2",color:"#b91c1c",fontSize:12,fontWeight:600}}>
+              ⚠ Could not save — browser storage is full. Your latest changes will be lost if you reload or close this page. Delete a subject you no longer need to free space.
+            </div>
+          )}
           <div className="content">
             {screen==="home"&&<SubjectsHome subjects={subjects} onSelect={selectSubject} onCreate={()=>setShowNewSubject(true)}/>}
             {screen==="dashboard"&&activeSubject&&<Dashboard subject={activeSubject} onNavigate={navigate} onUpdate={updateSubject}/>}
