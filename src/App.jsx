@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { graphEngine, ME, exJSON, buildDemoSubjects, subjectAvg, createGraph } from './utils.js';
+import { graphEngine, ME, exJSON, buildDemoSubjects, subjectAvg, createGraph, MASTERY_THRESHOLD } from './utils.js';
 import KeyGate from './KeyGate.jsx';
 import NewSubjectModal from './NewSubjectModal.jsx';
 import Ring from './Ring.jsx';
@@ -117,7 +117,7 @@ const App = () => {
   };
 
   const total = activeSubject ? Object.keys(activeSubject.graph.nodes).length : 0;
-  const mastered = activeSubject ? Object.values(activeSubject.graph.nodes).filter(c=>(activeSubject.mastery[c.id]||0)>=75).length : 0;
+  const mastered = activeSubject ? Object.values(activeSubject.graph.nodes).filter(c=>(activeSubject.mastery[c.id]||0)>=MASTERY_THRESHOLD).length : 0;
 
   const nav=[
     {id:"dashboard",icon:"◈",label:"Dashboard"},

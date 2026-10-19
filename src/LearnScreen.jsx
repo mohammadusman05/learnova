@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ME, exJSON, graphEngine } from './utils.js';
+import { ME, exJSON, graphEngine, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const {graph,mastery}=subject;
   const [cId,setCId]=useState(initialId||null);
@@ -160,11 +160,14 @@ Give a clear explanation with a practical real-world example.`,
       const correct=quiz.filter((q,i)=>sel[i]===q.correct).length;
       const pct=Math.round((correct/quiz.length)*100);
       setScore(pct);
+      // TA point 8: update mastery after EACH answer (BKT), and save every answer
       const old=subject.mastery[cId]||0;
-      const nw=old===0?pct:ME.update(old,pct);
+      const {mastery:nw, steps}=applyAnswers(old, quiz.map((q,i)=>({correct:sel[i]===q.correct, type:"mcq"})));
+      const at=Date.now();
+      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, correct:s.correct, type:"mcq", screen:"study", at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
       const newMastery={...subject.mastery,[cId]:nw};
-      const newGraph={...subject.graph,nodes:{...subject.graph.nodes,[cId]:{...subject.graph.nodes[cId],state:nw>=75?"MASTERED":"LEARNING"}}};
-      onUpdate({...subject,mastery:newMastery,graph:newGraph});
+      const newGraph={...subject.graph,nodes:{...subject.graph.nodes,[cId]:{...subject.graph.nodes[cId],state:nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
+      onUpdate({...subject,mastery:newMastery,graph:newGraph,answerLog:[...(subject.answerLog||[]),...log]});
       setTimeout(()=>setPhase("result"),900);
     };
     return (
@@ -215,7 +218,7 @@ Give a clear explanation with a practical real-world example.`,
               <div style={{fontSize:11,color:"var(--t3)",fontFamily:"var(--mono)",padding:"3px 10px",background:"var(--s3)",borderRadius:20}}>every concept from your lectures</div>
             </div>
           <div className="gauto mb24">
-            {all.filter(c=>(mastery[c.id]||0)<75).map(c=>{
+            {all.filter(c=>(mastery[c.id]||0)<MASTERY_THRESHOLD).map(c=>{
               const {color,label,bg,border}=ME.getLevel(mastery[c.id]||0);
               return(
                 <div key={c.id} className="cc" onClick={()=>startLearning(c.id)}>
@@ -228,14 +231,14 @@ Give a clear explanation with a practical real-world example.`,
           </div>
 
           {/* COMPLETED SECTION — at bottom */}
-          {all.filter(c=>(mastery[c.id]||0)>=75).length>0&&(
+          {all.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).length>0&&(
             <div className="mb24">
               <div className="f ac g12 mb8">
                 <div className="card-label" style={{margin:0,color:"#16a34a"}}>✅ COMPLETED</div>
-                <div style={{fontSize:11,color:"#16a34a",fontFamily:"var(--mono)",padding:"3px 10px",background:"#f0fdf4",borderRadius:20,border:"1px solid #86efac"}}>mastery ≥ 75%</div>
+                <div style={{fontSize:11,color:"#16a34a",fontFamily:"var(--mono)",padding:"3px 10px",background:"#f0fdf4",borderRadius:20,border:"1px solid #86efac"}}>mastery ≥ {MASTERY_THRESHOLD}%</div>
               </div>
               <div className="gauto">
-                {all.filter(c=>(mastery[c.id]||0)>=75).map(c=>{
+                {all.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).map(c=>{
                   const {color,bg,border}=ME.getLevel(mastery[c.id]||0);
                   return(
                     <div key={c.id} className="cc" onClick={()=>startLearning(c.id)} style={{borderColor:"#86efac",background:"#f0fdf4"}}>
@@ -418,7 +421,7 @@ Give a clear explanation with a practical real-world example.`,
         <div className="fade" style={{textAlign:"center",padding:"48px 20px"}}>
           <div className="score-big">{score}%</div>
           <div style={{fontSize:20,fontWeight:800,marginBottom:8,marginTop:12,color:"var(--t1)"}}>{score>=80?"Excellent work! 🎉":score>=60?"Good effort! 📚":"Keep practising! 💪"}</div>
-          <div className="ts t3 mb24 tm">Updated mastery: <span style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{subject.mastery[cId]||0}%</span>{" · "}{(subject.mastery[cId]||0)>=75?"Concept Mastered ✓":"Needs more practice"}</div>
+          <div className="ts t3 mb24 tm">Updated mastery: <span style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{subject.mastery[cId]||0}%</span>{" · "}{(subject.mastery[cId]||0)>=MASTERY_THRESHOLD?"Concept Mastered ✓":"Needs more practice"}</div>
           <div className="f g12 jc">
             <button className="btn btn-secondary" onClick={()=>setPhase("explain")}>Review Lesson</button>
             <button className="btn btn-primary" onClick={startQuiz}>Retake Quiz</button>

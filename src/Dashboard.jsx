@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ME, graphEngine } from './utils.js';
+import { ME, graphEngine, MASTERY_THRESHOLD } from './utils.js';
 import Ring from './Ring.jsx';
 const Dashboard = ({ subject, onNavigate, onUpdate }) => {
   const {graph,mastery}=subject;
   const concepts=Object.values(graph.nodes);
   const total=concepts.length;
-  const mastered=concepts.filter(c=>(mastery[c.id]||0)>=75).length;
+  const mastered=concepts.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).length;
   const avg=total?Math.round(concepts.reduce((s,c)=>s+(mastery[c.id]||0),0)/total):0;
   const ready=graphEngine.getReadyConcepts(graph,mastery);
-  const weak=concepts.filter(c=>(mastery[c.id]||0)>0&&(mastery[c.id]||0)<75).sort((a,b)=>mastery[a.id]-mastery[b.id]);
+  const weak=concepts.filter(c=>(mastery[c.id]||0)>0&&(mastery[c.id]||0)<MASTERY_THRESHOLD).sort((a,b)=>mastery[a.id]-mastery[b.id]);
   const order=graphEngine.getTopoOrder(graph);
   const stats=[
     {label:"TOTAL CONCEPTS",value:total,sub:"in knowledge graph",color:"#ff6f61"},
-    {label:"MASTERED",value:mastered,sub:"≥ 75% mastery",color:"#16a34a"},
+    {label:"MASTERED",value:mastered,sub:`≥ ${MASTERY_THRESHOLD}% mastery`,color:"#16a34a"},
     {label:"AVG MASTERY",value:`${avg}%`,sub:"across all concepts",color:"#263238"},
     {label:"READY TO LEARN",value:ready.length,sub:"prerequisites cleared",color:"#e8503f"},
   ];

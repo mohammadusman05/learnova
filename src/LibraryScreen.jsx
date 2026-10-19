@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ME } from './utils.js';
+import { ME, MASTERY_THRESHOLD } from './utils.js';
 const LibraryScreen = ({ subject }) => {
   const docs = subject.docs || [];
 
@@ -90,7 +90,7 @@ const LibraryScreen = ({ subject }) => {
               <div className="txs t3 tm">Concepts Total</div>
             </div>
             <div style={{textAlign:"center"}}>
-              <div style={{fontSize:28,fontWeight:800,color:"#0d9488"}}>{Object.values(subject.mastery).filter(v=>v>=75).length}</div>
+              <div style={{fontSize:28,fontWeight:800,color:"#0d9488"}}>{Object.values(subject.mastery).filter(v=>v>=MASTERY_THRESHOLD).length}</div>
               <div className="txs t3 tm">Mastered</div>
             </div>
           </div>

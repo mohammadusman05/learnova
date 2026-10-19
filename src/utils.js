@@ -17,8 +17,8 @@ const graphEngine = {
   getPrereqs(g, id) { return g.edges.filter(e=>e.target===id&&e.type==="prerequisite").map(e=>e.source); },
   getReadyConcepts(g, mastery) {
     return Object.values(g.nodes).filter(n=>{
-      if((mastery[n.id]||0)>=75) return false;
-      return graphEngine.getPrereqs(g,n.id).every(p=>(mastery[p]||0)>=60);
+      if((mastery[n.id]||0)>=MASTERY_THRESHOLD) return false;
+      return graphEngine.getPrereqs(g,n.id).every(p=>(mastery[p]||0)>=UNLOCK_THRESHOLD);
     });
   },
   getTopoOrder(g) {
@@ -29,14 +29,50 @@ const graphEngine = {
   }
 };
 
+// ============================================================
+// MASTERY — Bayesian Knowledge Tracing (TA point 8)
+// Mastery = how sure Learnova is that the learner knows a concept (0–100%).
+// It is updated after EVERY answer, in Study and in Evaluation alike.
+// ============================================================
+const MASTERY_THRESHOLD = 95; // % — concept counts as Mastered (standard BKT cutoff)
+const UNLOCK_THRESHOLD = 60;  // % — prerequisite known well enough to unlock the next concept
+const BKT = {
+  start: 0.10,                      // starting knowledge before any answer
+  learn: 0.10,                      // chance of learning it from one practice question
+  slip:  0.10,                      // chance a learner who knows it still answers wrong
+  guess: { mcq: 0.25, desc: 0.10 }, // chance of a lucky right answer (1 in 4 options; written answers are hard to guess)
+};
+
+// One answer → new mastery (whole %). 0 means "no answers yet", so BKT.start is used.
+// Certainty is capped at 99% inside the formula: at exactly 100% a wrong answer could never lower it.
+const bktUpdate = (masteryPct, correct, type="mcq") => {
+  const g = BKT.guess[type] ?? BKT.guess.mcq, s = BKT.slip, t = BKT.learn;
+  const p = masteryPct > 0 ? Math.min(masteryPct / 100, 0.99) : BKT.start;
+  const known = correct
+    ? (p * (1 - s)) / (p * (1 - s) + (1 - p) * g)
+    : (p * s) / (p * s + (1 - p) * (1 - g));
+  return Math.round((known + (1 - known) * t) * 100);
+};
+
+// Several answers in order → final mastery + the before/after of each answer (for the answer log)
+const applyAnswers = (masteryPct, answers = []) => {
+  let m = masteryPct || 0;
+  const steps = answers.map(a => {
+    const before = m;
+    m = bktUpdate(m, !!a.correct, a.type);
+    return { ...a, masteryBefore: before, masteryAfter: m };
+  });
+  return { mastery: m, steps };
+};
+
 const ME = {
-  update(cur,score){ return Math.round((cur+score)/2); },
   getLevel(s){
-    if(s>=90) return {label:"Expert",   color:"#0d9488",bg:"#f0fdfa",border:"#99f6e4"};
-    if(s>=75) return {label:"Mastered", color:"#16a34a",bg:"#f0fdf4",border:"#86efac"};
-    if(s>=50) return {label:"Learning", color:"#d97706",bg:"#fffbeb",border:"#fcd34d"};
-    if(s>=25) return {label:"Beginner", color:"#ea580c",bg:"#fff7ed",border:"#fdba74"};
-    return           {label:"Not Started",color:"#64748b",bg:"#f8fafc",border:"#cbd5e1"};
+    if(s>=MASTERY_THRESHOLD) return {label:"Mastered", color:"#16a34a",bg:"#f0fdf4",border:"#86efac"};             // 95–100%
+    if(s>=75) return {label:"Proficient", color:"#0d9488",bg:"#f0fdfa",border:"#99f6e4"};                           // 75–94%
+    if(s>=50) return {label:"Good Learner", color:"#2563eb",bg:"#eff6ff",border:"#bfdbfe"};                         // 50–74%
+    if(s>=25) return {label:"Intermediate", color:"#d97706",bg:"#fffbeb",border:"#fcd34d"};                 // 25–49%
+    if(s>0)   return {label:"Beginner", color:"#ea580c",bg:"#fff7ed",border:"#fdba74"};                             // 1–24%
+    return           {label:"Not Started",color:"#64748b",bg:"#f8fafc",border:"#cbd5e1"};                         // 0%
   }
 };
 
@@ -68,4 +104,4 @@ const subjectAvg = (subject) => {
 // ...
 // ============================================================
 
-export { graphEngine, ME, exJSON, buildDemoSubjects, subjectAvg, createGraph };
+export { graphEngine, ME, exJSON, buildDemoSubjects, subjectAvg, createGraph, MASTERY_THRESHOLD, UNLOCK_THRESHOLD, BKT, bktUpdate, applyAnswers };

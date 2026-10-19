@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Ring from './Ring.jsx';
-import { ME, subjectAvg } from './utils.js';
+import { ME, subjectAvg, MASTERY_THRESHOLD } from './utils.js';
 const SubjectsHome = ({ subjects, onSelect, onCreate }) => {
   const subList = Object.values(subjects);
   return (
@@ -11,7 +11,7 @@ const SubjectsHome = ({ subjects, onSelect, onCreate }) => {
         {subList.map(sub=>{
           const avg=subjectAvg(sub);
           const total=Object.keys(sub.graph.nodes).length;
-          const mastered=Object.values(sub.graph.nodes).filter(c=>(sub.mastery[c.id]||0)>=75).length;
+          const mastered=Object.values(sub.graph.nodes).filter(c=>(sub.mastery[c.id]||0)>=MASTERY_THRESHOLD).length;
           const {color}=ME.getLevel(avg);
           return (
             <div key={sub.id} className="subject-home-card" onClick={()=>onSelect(sub.id)}

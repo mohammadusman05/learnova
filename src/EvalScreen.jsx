@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ME, exJSON } from './utils.js';
+import { ME, exJSON, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
   return (
@@ -195,7 +195,7 @@ ${JSON.stringify(gradingInput)}`
       } else {
         // Fallback if parsing fails
         descQs.forEach(q => {
-          gradedResults.push({...q, userAnswer: answers[q.id]||"", correctAnswer: q.sampleAnswer, isCorrect:false, points:0, feedback:"Could not grade automatically."});
+          gradedResults.push({...q, userAnswer: answers[q.id]||"", correctAnswer: q.sampleAnswer, isCorrect:false, points:0, feedback:"Could not grade automatically.", ungraded:true});
         });
       }
     }
@@ -223,14 +223,17 @@ ${JSON.stringify(gradingInput)}`
     const conceptHistory = existing[selectedConcept] || [];
     const newHistory = [...conceptHistory, attempt];
 
-    let newMastery = {...subject.mastery};
-    let newGraph = {...subject.graph};
-    if(passed) {
-      newMastery[selectedConcept] = Math.max(newMastery[selectedConcept]||0, pct);
-      newGraph = {...newGraph, nodes:{...newGraph.nodes,[selectedConcept]:{...newGraph.nodes[selectedConcept],state:"MASTERED"}}};
-    }
+    // TA point 8: every graded answer updates mastery (BKT), pass or fail — mastery can go down.
+    // Answers the grader could not mark are skipped, so a grading failure never counts against the learner.
+    const graded = gradedResults.filter(r => !r.ungraded);
+    const old = subject.mastery[selectedConcept] || 0;
+    const { mastery: nw, steps } = applyAnswers(old, graded.map(r => ({ correct: !!r.isCorrect, type: r.type === "desc" ? "desc" : "mcq" })));
+    const at = Date.now();
+    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, correct: s.correct, type: s.type, screen: "evaluation", at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
+    const newMastery = {...subject.mastery, [selectedConcept]: nw};
+    const newGraph = {...subject.graph, nodes:{...subject.graph.nodes,[selectedConcept]:{...subject.graph.nodes[selectedConcept],state: nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
 
-    onUpdate({...subject, mastery:newMastery, graph:newGraph, evalHistory:{...existing,[selectedConcept]:newHistory}});
+    onUpdate({...subject, mastery:newMastery, graph:newGraph, evalHistory:{...existing,[selectedConcept]:newHistory}, answerLog:[...(subject.answerLog||[]), ...log]});
     setResults({...attempt});
     setPhase("results");
     setLoading(false);
