@@ -107,7 +107,7 @@ const App = () => {
   const [learnId,setLearnId]=useState(null);
   const [learnMode,setLearnMode]=useState(null); // point 17: "revise" opens a revision quiz directly
   const [learnReset,setLearnReset]=useState(0);  // clicking the Study tab again goes back to the Study home
-  const [sideOpen,setSideOpen]=useState("subjects"); // sidebar: "subjects" expanded, or "user" (User Management) expanded
+  const [userOpen,setUserOpen]=useState(false); // sidebar: User Management expanded or not (subjects always stay open)
   const [evalConceptId,setEvalConceptId]=useState(null);
   const [showNewSubject,setShowNewSubject]=useState(false);
 
@@ -197,10 +197,7 @@ const App = () => {
 
           {/* Subject Switcher */}
           <div className="subject-switcher">
-            <div className="subject-switcher-label subjects-toggle" style={{cursor:"pointer",display:"flex",alignItems:"center",userSelect:"none"}} onClick={()=>setSideOpen("subjects")}>
-              SUBJECTS<span style={{marginLeft:"auto"}}>{sideOpen==="subjects"?"▾":`▸ ${Object.keys(subjects).length}`}</span>
-            </div>
-            {sideOpen==="subjects"&&<>
+            <div className="subject-switcher-label">SUBJECTS</div>
             {/* All Subjects link */}
             <div className={`subject-item ${screen==="home"?"active":""}`} onClick={()=>{setActiveSubjectId(null);setScreen("home");}}>
               <span className="subject-emoji">🏠</span>
@@ -225,11 +222,10 @@ const App = () => {
               <span style={{fontSize:14}}>＋</span>
               <span>New Subject</span>
             </div>
-            </>}
           </div>
 
-          {/* Nav — only when a subject is active (hidden while User Management is open) */}
-          {activeSubject&&sideOpen==="subjects"&&(
+          {/* Nav — only when a subject is active */}
+          {activeSubject&&(
             <div className="nav-group">
               <div className="nav-label">NAVIGATE</div>
               {nav.map(item=>(
@@ -243,11 +239,12 @@ const App = () => {
 
           {/* User Management: Usage & cost (TA point 20) and Your data (TA point 18) */}
           <div className="nav-group">
-            <div className={`nav-item user-mgmt ${sideOpen==="user"?"active":""}`} onClick={()=>{setSideOpen("user");setScreen("data");}}>
+            {/* opening it shows Your data; clicking it again only folds it */}
+            <div className={`nav-item user-mgmt ${userOpen?"active":""}`} onClick={()=>{ if(userOpen) setUserOpen(false); else { setUserOpen(true); setScreen("data"); } }}>
               <span className="nav-icon">👤</span>User Management
-              <span style={{marginLeft:"auto",fontSize:11}}>{sideOpen==="user"?"▾":"▸"}</span>
+              <span style={{marginLeft:"auto",fontSize:11}}>{userOpen?"▾":"▸"}</span>
             </div>
-            {sideOpen==="user"&&(
+            {userOpen&&(
               <div style={{paddingLeft:14}}>
                 <div className={`nav-item usage-nav ${screen==="usage"?"active":""}`} onClick={()=>setScreen("usage")}>
                   <span className="nav-icon">💰</span>Usage & cost
@@ -279,7 +276,7 @@ const App = () => {
                 {Object.keys(subjects).length} subject{Object.keys(subjects).length!==1?"s":""} · {Object.values(subjects).reduce((a,s)=>a+Object.keys(s.graph.nodes).length,0)} concepts total
               </div>
             )}
-            <button className="btn btn-xs" style={{background:"rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.6)",border:"1px solid rgba(255,255,255,0.15)",fontSize:10,marginTop:12}} onClick={()=>setApiKey(null)}>🔒 Lock Session</button>
+            <button className="btn btn-xs" style={{background:"rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.6)",border:"1px solid rgba(255,255,255,0.15)",fontSize:10,marginTop:12}} onClick={()=>setApiKey(null)}>🚪 Log out</button>
           </div>
         </div>
 
@@ -299,10 +296,10 @@ const App = () => {
               ⚠ Could not save — browser storage is full. Your latest changes will be lost if you reload or close this page. Delete a subject you no longer need to free space.
             </div>
           )}
-          <AiBanner onOpenUsage={()=>{setSideOpen("user");setScreen("usage");}}/>
+          <AiBanner onOpenUsage={()=>{setUserOpen(true);setScreen("usage");}}/>
           <div className="content">
             {screen==="usage"&&<UsageScreen/>}
-            {screen==="data"&&<DataScreen subjects={subjects} onDeleted={()=>{ setSubjects({}); setActiveSubjectId(null); setScreen("home"); setSideOpen("subjects"); setConsented(false); }}/>}
+            {screen==="data"&&<DataScreen subjects={subjects} onDeleted={()=>{ setSubjects({}); setActiveSubjectId(null); setScreen("home"); setUserOpen(false); setConsented(false); }}/>}
             {screen==="home"&&<SubjectsHome subjects={subjects} onSelect={selectSubject} onCreate={()=>setShowNewSubject(true)} onImport={importShared}/>}
             {screen==="dashboard"&&activeSubject&&<Dashboard subject={activeSubject} onNavigate={navigate} onUpdate={updateSubject}/>}
             {screen==="upload"&&activeSubject&&<UploadScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey}/>}

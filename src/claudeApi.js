@@ -156,7 +156,7 @@ export const describeError = (status, body, networkError) => {
   const msg = String(body?.error?.message || "");
   const type = String(body?.error?.type || "");
   const said = msg ? ` (Claude said: "${msg.slice(0, 200)}")` : "";   // Claude's own words, for whoever has to fix it
-  if (status === 401 || type === "authentication_error") return new AiError(`Your API key was not accepted (it may be wrong or deleted). Lock the session and enter a valid key.${said}`, "invalid-key", status);
+  if (status === 401 || type === "authentication_error") return new AiError(`Your API key was not accepted (it may be wrong or deleted). Log out and enter a valid key.${said}`, "invalid-key", status);
   if (/credit balance/i.test(msg)) return new AiError(`Your API key has no credit left. Top up on Anthropic's website (console.anthropic.com → Billing) to continue.${said}`, "credit", status);
   if (/usage limit|spend limit|spending limit/i.test(msg)) return new AiError(`This key has reached the monthly spending limit set on Anthropic's website. Raise the limit there, or wait until next month.${said}`, "spend-limit", status);
   if (status === 429 || type === "rate_limit_error") return new AiError(`Claude is getting too many requests from this key right now. Wait a minute and try again.${said}`, "rate", status);
