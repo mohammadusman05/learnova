@@ -74,6 +74,7 @@ const knownId = (known, ref) => /^m\d+$/.test(ref || "") ? known[Number(ref.slic
 export const ANSWERS_PROMPT = `You help a tutor keep track of a learner's misunderstandings about one concept.
 You get the learner's KNOWN mistakes (open or fixed), and their WRONG and RIGHT answers from one quiz.
 1. For each WRONG answer, name the wrong idea behind it in one short line about the learner, starting with a verb, e.g. "thinks attention gives every word equal weight" or "confuses query vectors with key vectors". Describe the misunderstanding, not the question. If it is the same as a KNOWN mistake (open or fixed), reuse that id. If the answer shows no real wrong idea (a slip or a guess), use "none".
+   Several wrong answers often come from ONE underlying wrong idea (e.g. "thinks monolithic apps are as flexible as microservices"). Name that general idea, not each detail, and give every such answer exactly the same idea text — or the same KNOWN id. Use as few different ideas as honestly explain the wrong answers (usually 1–3).
 2. For each RIGHT answer, say which OPEN known mistake it shows the learner now understands — only when the question tests exactly that point. Otherwise use "none".
 Return ONLY valid JSON, nothing else:
 {"mistakes":[{"answer":"w1","match":"m2"},{"answer":"w2","match":"new","idea":"thinks ..."},{"answer":"w3","match":"none"}],"corrections":[{"answer":"r1","fixes":"m1"},{"answer":"r2","fixes":"none"}]}
@@ -150,7 +151,7 @@ export const applyAnalysis = (subject, cId, wrong, result, at = Date.now()) => {
     return i >= 0 && textFor[i] ? { ...e, misconception: textFor[i] } : e;
   });
   next = { ...next, answerLog: log };
-  const noted = [...touched.entries()].map(([id, f]) => { const x = mistakes.find(y => y.id === id); return { text: x.text, count: x.count, ...f }; });
+  const noted = [...touched.entries()].map(([id, f]) => { const x = mistakes.find(y => y.id === id); return { id, text: x.text, count: x.count, ...f }; });
   const progress = [...progressed].map(id => { const x = mistakes.find(y => y.id === id); return { text: x.text, corrections: x.corrections }; });
   return { subject: next, noted, fixed, progress };
 };
@@ -225,4 +226,63 @@ export const memorySummary = (subject, cId, { maxMistakes = 3, maxQuestions = 3,
   let text = lines.join("\n");
   if (text.length > maxChars) text = text.slice(0, maxChars - 1) + "…";
   return { text, mistakes, questions, last, before, prereqs };
+};
+
+// ── tidy-up: group open mistakes that come from the same underlying wrong idea ──
+export const GROUP_AT = 4; // after a quiz, group automatically when a concept has this many open mistakes
+export const GROUP_PROMPT = `You tidy one learner's list of open mistakes about one concept.
+Put mistakes that come from the SAME underlying wrong idea into one group, and write one short line for the group about the learner, starting with a verb (e.g. "thinks monolithic apps are as flexible as microservices"). Keep genuinely different misunderstandings in separate groups. Use as few groups as honestly possible (usually 1–3).
+Return ONLY valid JSON, nothing else:
+{"groups":[{"ids":["m1","m3"],"idea":"thinks ..."},{"ids":["m2"],"idea":"..."}]}
+Include every id exactly once.`;
+
+/** mistakes: the open mistakes to tidy → [{ids:[mistakeId,…], idea}] (ids not returned by Claude stay on their own) */
+export const groupMistakes = async (callClaude, concept, mistakes) => {
+  if (mistakes.length < 2) return [];
+  const list = mistakes.map((x, i) => `m${i + 1}: ${x.text}${x.count > 1 ? ` (seen ${x.count}×)` : ""}`).join("\n");
+  const p = await askJSON(callClaude, GROUP_PROMPT, `Concept: "${concept?.name}" — ${oneLine(concept?.definition)}\n\nOPEN mistakes:\n${list}`, x => Array.isArray(x.groups));
+  const used = new Set();
+  return p.groups.map(g => ({
+    ids: (Array.isArray(g?.ids) ? g.ids : []).map(r => knownId(mistakes, r)).filter(id => id && !used.has(id) && used.add(id)),
+    idea: oneLine(g?.idea, 200),
+  })).filter(g => g.ids.length && g.idea);
+};
+
+/** Merge each group into one mistake (counts added, examples kept, earliest first seen). Returns {subject, map: oldId → newId} */
+export const applyGrouping = (subject, cId, groups, at = Date.now()) => {
+  const m = getMemory(subject, cId);
+  let mistakes = m.mistakes.map(x => ({ ...x }));
+  const map = {};
+  groups.forEach((g, gi) => {
+    const parts = mistakes.filter(x => g.ids.includes(x.id) && x.status !== "fixed");
+    if (parts.length < 2 && !(parts.length === 1 && parts[0].text !== g.idea)) return;
+    const merged = {
+      id: parts.length === 1 ? parts[0].id : `mk_${at}_g${gi}`, text: g.idea, status: "open", corrections: 0,
+      count: parts.reduce((a, x) => a + (x.count || 1), 0),
+      firstSeen: Math.min(...parts.map(x => x.firstSeen || at)), lastSeen: Math.max(...parts.map(x => x.lastSeen || 0)),
+      examples: parts.flatMap(x => x.examples || []).sort((a, b) => (a.at || 0) - (b.at || 0)).slice(-MAX_EXAMPLES),
+      groupedFrom: parts.map(x => x.text),
+    };
+    parts.forEach(x => { map[x.id] = merged.id; });
+    mistakes = [...mistakes.filter(x => !parts.includes(x)), merged];
+  });
+  return { subject: putMemory(subject, cId, { ...m, mistakes }), map };
+};
+
+/** After a quiz: if a concept has GROUP_AT or more open mistakes, group them. Returns {subject, map} or null when nothing changed. */
+export const autoGroup = async (callClaude, subject, cId, concept) => {
+  const open = getMemory(subject, cId).mistakes.filter(x => x.status !== "fixed");
+  if (open.length < GROUP_AT) return null;
+  const groups = await groupMistakes(callClaude, concept, open);
+  const r = applyGrouping(subject, cId, groups);
+  return Object.keys(r.map).length ? r : null;
+};
+/** Point the "Learnova noted" items at the merged mistakes after grouping */
+export const remapNoted = (subject, cId, noted, map) => {
+  const ms = getMemory(subject, cId).mistakes, seen = new Set();
+  return (noted || []).map(n => {
+    const id = map[n.id] || n.id, x = ms.find(y => y.id === id);
+    if (!x || seen.has(id)) return null; seen.add(id);
+    return { ...n, id, text: x.text, count: x.count };
+  }).filter(Boolean);
 };

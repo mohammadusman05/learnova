@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, exJSON, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt } from './retrieval.js';
-import { getMemory, analyseAnswers, applyAnalysis } from './learnerMemory.js';
+import { getMemory, analyseAnswers, applyAnalysis, autoGroup, remapNoted } from './learnerMemory.js';
 import { NotedLine, PersonalisationSwitch, TargetTag } from './MemoryBox.jsx';
 import { isPersonalised, targetBlock, resolveTargets } from './personalise.js';
 import { scheduleAfterQuiz } from './revision.js';
@@ -277,7 +277,10 @@ ${JSON.stringify(gradingInput)}`
       const res = await analyseAnswers(callClaude, c, { wrong, right }, known);
       const r = applyAnalysis(subjRef.current, cIdNow, wrong, res, at);
       commit(r.subject);
-      setNoted({ status: "done", items: r.noted, fixed: r.fixed, progress: r.progress, hadWrong: wrong.length > 0 });
+      let items = r.noted;
+      // many open mistakes on one concept → group the ones that share the same underlying idea
+      try { const g = await autoGroup(callClaude, subjRef.current, cIdNow, c); if (g) { commit(g.subject); items = remapNoted(g.subject, cIdNow, items, g.map); } } catch { /* keep them ungrouped */ }
+      setNoted({ status: "done", items, fixed: r.fixed, progress: r.progress, hadWrong: wrong.length > 0 });
     } catch (e) { setNoted({ status: "failed", error: e.message }); }
   };
 

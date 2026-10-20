@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, exJSON, graphEngine, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
-import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck } from './learnerMemory.js';
+import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck, autoGroup, remapNoted, groupMistakes, applyGrouping } from './learnerMemory.js';
 import { MemoryBox, EarlierChat, NotedLine, ChatNoted, PersonalisationSwitch, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
 import { scheduleAfterQuiz, dueList, nextRevisionLabel, revisionTargets, getSchedule } from './revision.js';
@@ -222,8 +222,17 @@ Give a clear explanation with a practical real-world example.`,
       const res=await analyseAnswers(callClaude,graph.nodes[cId],{wrong,right},known);
       const r=applyAnalysis(subjRef.current,cId,wrong,res,at);
       commit(r.subject);
-      setNoted({status:"done",items:r.noted,fixed:r.fixed,progress:r.progress,hadWrong:wrong.length>0});
+      let items=r.noted;
+      // many open mistakes on one concept → group the ones that share the same underlying idea
+      try{ const g=await autoGroup(callClaude,subjRef.current,cId,graph.nodes[cId]); if(g){ commit(g.subject); items=remapNoted(g.subject,cId,items,g.map); } }catch{ /* keep them ungrouped */ }
+      setNoted({status:"done",items,fixed:r.fixed,progress:r.progress,hadWrong:wrong.length>0});
     }catch(e){ setNoted({status:"failed",error:e.message}); }
+  };
+  // "🧩 Group similar mistakes" button in the memory box
+  const groupNow=async()=>{
+    const open=getMemory(subjRef.current,cId).mistakes.filter(x=>x.status!=="fixed");
+    const groups=await groupMistakes(callClaude,graph.nodes[cId],open);
+    commit(applyGrouping(subjRef.current,cId,groups).subject);
   };
   // TA point 15: a chat question can show a misunderstanding too — noted under the reply
   const checkChat=async(question,msgId)=>{
@@ -418,7 +427,7 @@ Give a clear explanation with a practical real-world example.`,
       {phase==="explain"&&(
         <div style={{maxWidth:"100%"}}>
           {/* TA point 14: what Learnova remembers about this learner on this concept */}
-          <MemoryBox subject={subject} cId={cId} onChange={commit}/>
+          <MemoryBox subject={subject} cId={cId} onChange={commit} onGroup={groupNow}/>
           <EarlierChat subject={subject} cId={cId} since={sessionStart} onChange={commit}/>
           {/* Source selector — shown before generating */}
           {!sourcesReady&&(

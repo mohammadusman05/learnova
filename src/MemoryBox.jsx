@@ -17,8 +17,9 @@ const Row = ({ label, children }) => (
   </div>
 );
 
-export const MemoryBox = ({ subject, cId, onChange }) => {
+export const MemoryBox = ({ subject, cId, onChange, onGroup }) => {
   const [open, setOpen] = useState(true);
+  const [grouping, setGrouping] = useState("");
   const [allQs, setAllQs] = useState(false);
   const [showUse, setShowUse] = useState(false);
   const m = getMemory(subject, cId);
@@ -80,6 +81,15 @@ export const MemoryBox = ({ subject, cId, onChange }) => {
                   {onChange && <X title="This is not right — forget it" onClick={() => onChange(removeMistake(subject, cId, x.id))} />}
                 </div>
               ))}
+            </Row>
+          )}
+          {onGroup && openList.length >= 3 && (
+            <Row label="">
+              <button className="btn btn-secondary btn-xs group-mistakes" disabled={grouping === "working"}
+                onClick={async () => { setGrouping("working"); try { await onGroup(); setGrouping(""); } catch (e) { setGrouping(`Could not group: ${e.message}`); } }}>
+                {grouping === "working" ? "Grouping…" : "🧩 Group similar mistakes"}
+              </button>
+              {grouping && grouping !== "working" && <span className="txs" style={{ marginLeft: 8, color: "#b45309" }}>{grouping}</span>}
             </Row>
           )}
           {fixed.length > 0 && (
