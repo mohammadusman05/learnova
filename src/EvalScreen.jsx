@@ -550,7 +550,9 @@ ${JSON.stringify(gradingInput)}`
           </div>
           <div className="ts t3 mb16">{results.totalPoints} / {results.totalQs} correct · {concept?.name}</div>
           {passed
-            ? <div style={{fontSize:13,color:"#16a34a",fontFamily:"var(--mono)"}}>Concept marked as Mastered! Great work 🎉</div>
+            ? ((subject.mastery[selectedConcept]||0) >= MASTERY_THRESHOLD   // Mastered only when BKT mastery reaches 95% (point 8)
+                ? <div style={{fontSize:13,color:"#16a34a",fontFamily:"var(--mono)"}}>Concept Mastered ({subject.mastery[selectedConcept]}%)! Great work 🎉</div>
+                : <div style={{fontSize:13,color:"#16a34a",fontFamily:"var(--mono)"}}>Passed — mastery now {subject.mastery[selectedConcept]||0}%. Keep practising to reach {MASTERY_THRESHOLD}% (Mastered).</div>)
             : <div style={{fontSize:13,color:"#dc2626",fontFamily:"var(--mono)"}}>Score 75% or above to pass. Review the topic and retake.</div>
           }
           <NotedLine noted={noted}/>
