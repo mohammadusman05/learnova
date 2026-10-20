@@ -3,7 +3,7 @@ import { ME, graphEngine, MASTERY_THRESHOLD } from './utils.js';
 import Ring from './Ring.jsx';
 import { dueList } from './revision.js';
 import { isStatic, isPlain } from './studyMode.js';
-import { chatSummary, buildAttachment } from './plainChat.js';
+import { chatSummary } from './plainChat.js';
 import { StudyModeCard } from './MemoryBox.jsx';
 const Dashboard = ({ subject, onNavigate, onUpdate }) => {
   const {graph,mastery}=subject;
@@ -25,7 +25,7 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
   ];
   // TA point 22: Plain AI chat mode — no topics or mastery, just the chat and the mode switch
   if(isPlain(subject)){
-    const cs=chatSummary(subject), att=buildAttachment(subject);
+    const cs=chatSummary(subject), names=(subject.docs||[]).map(d=>d.name);
     return (
       <div className="fade">
         <div className="section-title">{subject.emoji} {subject.name}</div>
@@ -38,7 +38,7 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
                 <div key={l}><div style={{fontSize:26,fontWeight:800,color:"var(--t1)"}}>{v}</div><div className="txs t3 tm">{l}</div></div>
               ))}
             </div>
-            <div className="txs t3 mb12" style={{lineHeight:1.7}}>📎 Lectures attached: {att.attached.length?att.attached.join(", "):"none yet"}</div>
+            <div className="txs t3 mb12" style={{lineHeight:1.7}}>📄 PDFs in this subject: {names.length?names.join(", "):"none yet"} — you choose which ones in each chat</div>
             <button className="btn btn-primary btn-sm open-chat" onClick={()=>onNavigate("chat")}>Open AI Chat →</button>
           </div>
           <StudyModeCard subject={subject} onChange={onUpdate}/>
