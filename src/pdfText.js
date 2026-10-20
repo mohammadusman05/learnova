@@ -27,7 +27,8 @@ export const extractPdfText = async (arrayBuffer) => {
   const pdfjs = await import("pdfjs-dist");
   const { default: workerUrl } = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
+  const task = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) });
+  const pdf = await task.promise;
   const numPages = pdf.numPages;
   const pages = [];
   for (let i = 1; i <= numPages; i++) {
@@ -36,6 +37,7 @@ export const extractPdfText = async (arrayBuffer) => {
     pages.push(itemsToText(content.items));
     page.cleanup();
   }
-  await pdf.destroy();
+  // free memory; never let clean-up throw away the text we just read
+  try { await (typeof task.destroy === "function" ? task.destroy() : pdf.cleanup?.()); } catch { /* ignore */ }
   return { text: pages.join("\n\n"), numPages, pages }; // pages: text of each page, for page citations (point 11)
 };
