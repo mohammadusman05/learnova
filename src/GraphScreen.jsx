@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, graphEngine } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { confirmLink, removeLink, flipLink, addLink, recheckAllLinks, linksCsv, evidenceLabel } from './prereqLinks.js';
+import { makeCaller } from './claudeApi.js';
 
 // TA point 12: how sure we are about a link
 const LinkBadge = ({ e }) => {
@@ -310,18 +311,7 @@ const GraphScreen = ({ subject, onUpdate, apiKey }) => {
   const onGraphChange = onUpdate ? (g) => onUpdate({ ...latest.current, graph: g }) : null;
 
   // ── Claude text API (same as the Upload screen) ──
-  const callClaude = async (sys, usr, mt = 1500, temperature) => {
-    const body = { model: "claude-haiku-4-5-20251001", max_tokens: mt, system: sys, messages: [{ role: "user", content: usr }] };
-    if (temperature !== undefined) body.temperature = temperature;
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify(body),
-    });
-    const d = await res.json();
-    if (d.error) throw new Error(d.error.message || "API error");
-    return d.content?.[0]?.text || "";
-  };
+  const callClaude = makeCaller(apiKey);   // TA point 20: shared caller (token meter, budget, retries, clear errors)
 
   // TA point 12: find links again across all PDFs and check every AI link a second time
   const recheck = async () => {

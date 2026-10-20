@@ -30,9 +30,11 @@ export const getConsent = () => { try { const c = JSON.parse(safeGet(CONSENT_KEY
 export const giveConsent = (now = Date.now()) => { const c = { version: CONSENT_VERSION, at: now }; safeSet(CONSENT_KEY, JSON.stringify(c)); return c; };
 
 // ── backup / delete ──
+const parseOr = (v) => { try { return v ? JSON.parse(v) : null; } catch { return null; } };
 export const myDataBackup = (subjects, now = Date.now()) => ({
   app: "Learnova", exportedAt: new Date(now).toISOString(),
   learnerCode: safeGet(CODE_KEY) || "", consent: getConsent(), subjects: subjects || {},
+  aiUsage: parseOr(safeGet("learnova_usage")), aiBudget: parseOr(safeGet("learnova_budget")),   // point 20: counts only, no text
 });
 /** Removes every Learnova item from this browser. Returns the keys removed. */
 export const deleteAllMyData = () => {

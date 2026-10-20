@@ -26,7 +26,7 @@ Return ONLY valid JSON, nothing else:
 {"statements":[{"text":"short statement","cites":["S1"],"verdict":"supported","note":"why, one short line"}]}
 ${LECTURE_GUARD}`;
 
-const passagesBlock = (passages) => passages.map((p, i) => `[S${i + 1}] (${p.label || p.docName || "lecture"})\n${p.text}`).join("\n\n");
+export const passagesBlock = (passages) => passages.map((p, i) => `[S${i + 1}] (${p.label || p.docName || "lecture"})\n${p.text}`).join("\n\n");
 
 /** → {statements:[{text, cites, verdict, note}], supported, notSupported, beyond, checked, score (0–100 or null)} */
 export const checkGrounding = async (callClaude, answer, passages) => {

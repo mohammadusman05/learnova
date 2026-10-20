@@ -8,6 +8,9 @@ import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBl
 import { LECTURE_GUARD } from './privacy.js';
 import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerSystem, filterToLecture } from './faithfulness.js';
 import { FaithBadge, KeyCheckNote } from './FaithBadge.jsx';
+import { makeCaller } from './claudeApi.js';
+import { AiErrorBox } from './AiStatus.jsx';
+import { choiceKey, getSaved, saveExplanation } from './savedExplanations.js';
 import { scheduleAfterQuiz, dueList, nextRevisionLabel, revisionTargets, getSchedule } from './revision.js';
 
 // TA point 11: list the lecture passages a reply actually cited, e.g. "[S1] L01.pdf, p.6"
@@ -45,7 +48,8 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
   const [quizPersonalised,setQuizPersonalised]=useState(false);
   const [revisionMode,setRevisionMode]=useState(false);       // point 17: this quiz is a revision
   const [revisionResult,setRevisionResult]=useState("");
-  const [keyNote,setKeyNote]=useState(null);                 // point 19: quiz answer keys checked against the lecture
+  const [keyNote,setKeyNote]=useState(null);
+  const [quizError,setQuizError]=useState("");               // point 20: why the quiz could not be made                 // point 19: quiz answer keys checked against the lecture
   const subjRef=useRef(subject); subjRef.current=subject;    // newest subject, for saves that finish after a Claude call
   const commit=(updated)=>{ subjRef.current=updated; onUpdate(updated); };
   const bottomRef=useRef();
@@ -54,10 +58,8 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
   const due=dueList(subject); // point 17
   const all=Object.values(graph.nodes);
 
-  const callClaude=async(sys,usr,mt=1500,temperature)=>{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:mt,system:sys,messages:[{role:"user",content:usr}],...(temperature!==undefined?{temperature}:{})})});
-    const d=await res.json();return d.content?.[0]?.text||"";
-  };
+  // TA point 20: one shared caller — counts tokens, respects the budget, retries when busy, shows Claude's real error
+  const callClaude=makeCaller(apiKey);
 
   const updateMastery=(id,val)=>{ onUpdate({...subject,mastery:{...subject.mastery,[id]:val}}); };
   const updateGraph=(newGraph)=>{ onUpdate({...subject,graph:newGraph}); };
@@ -116,8 +118,17 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
     return;
   };
 
-  const generateExplanation=async()=>{
+  // TA point 20: which saved explanation (if any) matches the current source choice
+  const savedFor=(id)=>{
+    const c=graph.nodes[id]; if(!c) return null;
+    const docIds=conceptDocIds(c);
+    const hasDocs=(subject.docs||[]).some(d=>docIds.includes(d.id));
+    const wantDoc=sourceChoice.doc&&hasDocs, wantKb=sourceChoice.kb||!wantDoc;
+    return getSaved(subject,id,choiceKey(wantDoc,wantKb),docIds);
+  };
+  const generateExplanation=async(opts={})=>{
     const c=graph.nodes[cId];if(!c) return;
+    const fresh=opts===true||opts?.fresh===true;
     setMessages([]);setLoading(true);setSourcesReady(true);
     commit(noteStudied(subjRef.current,cId)); // point 14: remember each study visit
     try{
@@ -130,6 +141,25 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
       let docMsgId=null, docCheck=null;
       // TA point 16: a personal note ("For you" + quick recap of weak prerequisites) is prepared alongside the explanation
       const notePromise=personalNote(callClaude,subjRef.current,cId,{useLecture:wantDoc}).catch(e=>({error:e.message}));
+      const personalOf=(note)=>{
+        const personal=[];
+        if(note?.recap?.length) personal.push({role:"recap",items:note.recap,sources:note.recapSources});
+        if(note?.forYou?.length) personal.push({role:"foryou",items:note.forYou,covers:note.covers,sources:note.forYouSources});
+        if(note?.error) personal.push({role:"ai",note:true,content:`(Could not personalise this explanation: ${note.error})`});
+        return personal;
+      };
+      // TA point 20: a saved explanation for this choice → shown at no AI cost (only the "For you" note is made fresh)
+      const key=choiceKey(wantDoc,wantKb), docIds=conceptDocIds(c);
+      const saved=!fresh&&getSaved(subjRef.current,cId,key,docIds);
+      if(saved){
+        const items=saved.items.map(m=>({...m}));
+        const info={role:"saved-info",at:saved.at};
+        setMessages([info,{role:"loading-personal",content:""},...items]);
+        const note=await notePromise;
+        setMessages([info,...personalOf(note),...items]);
+        setLoading(false);
+        return;
+      }
       if(sourceChoice.doc&&!hasDocs) out.push({role:"ai",note:true,content:"No uploaded document contains this concept, so this explanation uses general knowledge."});
       if(wantDoc){
         setMessages([...out,{role:"loading-doc",content:""}]);
@@ -181,13 +211,10 @@ Give a clear explanation with a practical real-world example.`,
         out[out.findIndex(x=>x.id===docMsgId)]=msg;
         if(r.f) commit(logFaith(subjRef.current,groundingEntry(cId,"explanation",r.f))); // left-out sentences go to the Faithfulness CSV only
       }
+      commit(saveExplanation(subjRef.current,cId,key,docIds,out)); // point 20: next time this is shown without AI cost
       setMessages([{role:"loading-personal",content:""},...out]);
       const note=await notePromise;
-      const personal=[];
-      if(note?.recap?.length) personal.push({role:"recap",items:note.recap,sources:note.recapSources});
-      if(note?.forYou?.length) personal.push({role:"foryou",items:note.forYou,covers:note.covers,sources:note.forYouSources});
-      if(note?.error) personal.push({role:"ai",note:true,content:`(Could not personalise this explanation: ${note.error})`});
-      setMessages([...personal,...out]);
+      setMessages([...personalOf(note),...out]);
     }catch(e){setMessages([{role:"ai",content:"Error: "+e.message}]);}
     setLoading(false);
   };
@@ -276,7 +303,14 @@ Give a clear explanation with a practical real-world example.`,
       if(r.noted){ commit(r.subject); setMessages(m=>m.map(x=>x.id===msgId?{...x,noted:r.noted}:x)); }
     }catch{ /* the chat itself still works; nothing is noted for this question */ }
   };
+  // TA point 20: if Claude fails, say why (instead of an empty quiz) and offer "Try again"
+  const lastQuizOpts=useRef({});
   const generateQuiz=async(opts={})=>{
+    lastQuizOpts.current=opts; setQuizError("");
+    try{ await makeQuiz(opts); }
+    catch(e){ setQuiz([]); setQuizError(e.message); setLoading(false); }
+  };
+  const makeQuiz=async(opts={})=>{
     setQuizSetup(false); setLoading(true); setQuiz(null);
     const id=opts.id||cId, revision=!!opts.revision;
     const c=graph.nodes[id];
@@ -314,6 +348,7 @@ Give a clear explanation with a practical real-world example.`,
     const [sel,setSel]=useState({});
     const [done,setDone]=useState(false);
     if(!quiz) return <div className="loading"><div className="spin"/><span>Generating quiz...</span></div>;
+    if(quizError) return <AiErrorBox message={quizError} what="make the quiz" onRetry={()=>generateQuiz(lastQuizOpts.current)}/>;
     const submit=()=>{
       setDone(true);
       const correct=quiz.filter((q,i)=>sel[i]===q.correct).length;
@@ -506,9 +541,9 @@ Give a clear explanation with a practical real-world example.`,
                 </div>
               </div>
               <button className="btn btn-primary btn-lg"
-                onClick={generateExplanation}
+                onClick={()=>generateExplanation()}
                 disabled={!sourceChoice.doc&&!sourceChoice.kb}>
-                ⚡ Generate Explanation
+                {savedFor(cId)?"📌 Show saved explanation":"⚡ Generate Explanation"}
               </button>
             </div>
           )}
@@ -534,6 +569,13 @@ Give a clear explanation with a practical real-world example.`,
             // Loading states
             if(m.role==="loading-doc") return (
               <div key={i} className="loading fade"><div className="spin"/><span>Reading your document...</span></div>
+            );
+            // TA point 20: saved explanation — no AI cost; "Generate new" makes a fresh one
+            if(m.role==="saved-info") return (
+              <div key={i} className="saved-info fade f ac g8" style={{marginBottom:14,padding:"8px 12px",borderRadius:8,background:"#f8fafc",border:"1px solid var(--b1)",fontSize:12,color:"var(--t3)",fontFamily:"var(--mono)",flexWrap:"wrap"}}>
+                <span>📌 Saved explanation from {new Date(m.at).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})} · no AI cost</span>
+                <button className="btn btn-ghost btn-xs generate-new" disabled={loading} onClick={()=>generateExplanation({fresh:true})}>🔄 Generate new</button>
+              </div>
             );
             if(m.role==="loading-check") return (
               <div key={i} className="loading fade"><div className="spin"/><span>🔎 Checking against your lecture…</span></div>

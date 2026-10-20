@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { testKey } from './claudeApi.js';
 const KeyGate = ({ onUnlock, logo, notice }) => {
   const [key,setKey]=useState("");
   const [show,setShow]=useState(false);
@@ -8,12 +9,11 @@ const KeyGate = ({ onUnlock, logo, notice }) => {
   const verify = async () => {
     if(!key.trim()){setError("Please enter your Anthropic API key.");return;}
     setLoading(true);setError("");
-    try {
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":key.trim(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:10,messages:[{role:"user",content:"hi"}]})});
-      if(res.status===401){setError("Invalid API key. Please check and try again.");setLoading(false);return;}
-      onUnlock(key.trim());
-    } catch(e){ onUnlock(key.trim()); }
+    // TA point 20: a key with no credit (or no internet) still gets in — the app then shows "AI paused" with the reason
+    const r=await testKey(key.trim());
+    if(!r.ok){setError(r.error);setLoading(false);return;}
     setLoading(false);
+    onUnlock(key.trim());
   };
 
   return (

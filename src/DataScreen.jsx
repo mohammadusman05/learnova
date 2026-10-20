@@ -59,6 +59,7 @@ const DataScreen = ({ subjects, onDeleted }) => {
 
       <Section title="WHAT IS SAVED — ONLY IN THIS BROWSER">
         {list.length} subject{list.length !== 1 ? "s" : ""} · {count(s => (s.docs || []).length)} uploaded document{count(s => (s.docs || []).length) !== 1 ? "s" : ""} (their text) · {count(s => Object.keys(s.graph?.nodes || {}).length)} concepts and links · {count(s => (s.answerLog || []).length)} saved answers · chat, mistakes and revision dates.
+        <br />Also: <b>AI usage counts</b> (number of AI calls and tokens per day and feature — no text) and your monthly AI budget, for the 💰 Usage & cost page.
         <br />It is stored in this browser's local storage, as plain text. There is <b>no Learnova server or database</b> — the website only delivers the app's code. Anyone using this browser on this computer can see it.
       </Section>
       <Section title="WHAT IS SENT ELSEWHERE">

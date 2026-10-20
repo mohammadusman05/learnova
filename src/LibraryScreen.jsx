@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ME, MASTERY_THRESHOLD, answerLogCsv } from './utils.js';
 import { faithCsv, faithSummary } from './faithfulness.js';
+import { exportSubject, shareFileName } from './subjectShare.js';
 const LibraryScreen = ({ subject }) => {
   const docs = subject.docs || [];
   const answerCount = (subject.answerLog || []).length;
@@ -15,6 +16,15 @@ const LibraryScreen = ({ subject }) => {
     const slug = (subject.name || "subject").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const d = new Date();
     a.href = url; a.download = `learnova-faithfulness-${slug}-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  // TA point 20: share the lectures, concepts and links (never progress) so learners don't upload the PDFs again
+  const downloadSubject = () => {
+    const blob = new Blob([JSON.stringify(exportSubject(subject))], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = shareFileName(subject);
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -60,6 +70,19 @@ const LibraryScreen = ({ subject }) => {
     <div className="fade">
       <div className="section-title">Document Library</div>
       <div className="section-sub">{subject.emoji} {subject.name} · {docs.length} document{docs.length!==1?"s":""} uploaded</div>
+
+      {docs.length>0 && (
+        <div className="card mb16 share-card" style={{padding:"14px 18px",display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:240}}>
+            <div className="card-label">SHARE THIS SUBJECT</div>
+            <div className="txs t3" style={{lineHeight:1.7,marginTop:4}}>
+              Download the lectures, concepts and prerequisite links as one file. Others open it with <b>⬆ Import subject</b> on the All Subjects page — no need to upload (and pay for) the PDFs again.
+              Your progress, answers and chats are <b>not</b> included. The file contains the lecture text, so share it only with your course.
+            </div>
+          </div>
+          <button className="btn btn-primary btn-sm export-subject" onClick={downloadSubject}>⬇ Export subject</button>
+        </div>
+      )}
 
       {docs.length === 0 ? (
         <div className="empty">

@@ -4,6 +4,7 @@ import { EXTRACT_PROMPT, MERGE_PROMPT, stripRepeatedLines, splitIntoPartsWithOff
 import { linkNewDocument } from './prereqLinks.js';
 import { LECTURE_GUARD } from './privacy.js';
 import { extractPdfText, looksScanned } from './pdfText.js';
+import { makeCaller, requestClaude } from './claudeApi.js';
 const UploadScreen = ({ subject, onUpdate, apiKey }) => {
   const [drag,setDrag]=useState(false);
   const [text,setText]=useState("");
@@ -16,33 +17,16 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
   const fileRef=useRef();
 
   // ── Claude text API ──
-  const callClaude=async(sys,usr,mt=1500,temperature)=>{
-    const body={model:"claude-haiku-4-5-20251001",max_tokens:mt,system:sys,messages:[{role:"user",content:usr}]};
-    if(temperature!==undefined) body.temperature=temperature;
-    const res=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify(body)
-    });
-    const d=await res.json();
-    if(d.error) throw new Error(d.error.message||"API error");
-    return d.content?.[0]?.text||"";
-  };
+  const callClaude=makeCaller(apiKey);   // TA point 20: shared caller (token meter, budget, retries, clear errors)
 
   // ── Claude Vision API ──
   const callClaudeVision=async(b64,mime)=>{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:2000,
+    const d=await requestClaude(apiKey,{max_tokens:2000,
         messages:[{role:"user",content:[
           {type:"image",source:{type:"base64",media_type:mime,data:b64}},
           {type:"text",text:"Extract all readable text from this image. Return only the raw text content, preserving structure as much as possible."}
         ]}]
-      })
-    });
-    const d=await res.json();
-    if(d.error) throw new Error(d.error.message||"API error");
+      },{feature:"upload-read"});
     return d.content?.[0]?.text||"";
   };
 
@@ -81,21 +65,14 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
           const b64=btoa(binary);
           setStep("Scanned PDF — reading pages with AI...");
           // ...
-          const res=await fetch("https://api.anthropic.com/v1/messages",{
-            method:"POST",
-            headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-            body:JSON.stringify({
-              model:"claude-haiku-4-5-20251001",
+          const d=await requestClaude(apiKey,{
               max_tokens:16000,
               temperature:0,
               messages:[{role:"user",content:[
                 {type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}},
                 {type:"text",text:"Extract all the text content from this PDF document. Return only the raw text, preserving paragraph structure. "+LECTURE_GUARD}
               ]}]
-            })
-          });
-          const d=await res.json();
-          if(d.error) throw new Error(d.error.message||"API error");
+            },{feature:"upload-read"});
           const extracted=d.content?.[0]?.text||"";
           if(!extracted||extracted.length<30){
             setStep(""); setLoading(false);

@@ -9,6 +9,8 @@ import { scheduleAfterQuiz } from './revision.js';
 import { LECTURE_GUARD } from './privacy.js';
 import { checkAnswerKeys, logFaith } from './faithfulness.js';
 import { KeyCheckNote } from './FaithBadge.jsx';
+import { makeCaller } from './claudeApi.js';
+import { AiErrorBox } from './AiStatus.jsx';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
   return (
@@ -90,6 +92,7 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [noted, setNoted] = useState(null);
+  const [genError, setGenError] = useState(""); // point 20: why the questions could not be made
   const [keyNote, setKeyNote] = useState(null); // point 19: MCQ answer keys checked against the lecture                       // point 14: mistakes noted after an evaluation
   const subjRef = useRef(subject); subjRef.current = subject;     // newest subject, for saves that finish after a Claude call
   const commit = (updated) => { subjRef.current = updated; onUpdate(updated); };
@@ -99,19 +102,19 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
     if(initialConceptId){ setSelectedConcept(initialConceptId); setPhase("config"); }
   },[initialConceptId]);
 
-  const callClaude = async (sys, usr, mt=3000, temperature) => {
-    const res = await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:mt,system:sys,messages:[{role:"user",content:usr}],...(temperature!==undefined?{temperature}:{})})
-    });
-    const d = await res.json(); return d.content?.[0]?.text || "";
-  };
+  // TA point 20: one shared caller — counts tokens, respects the budget, retries when busy, shows Claude's real error
+  const callClaude = makeCaller(apiKey, { defaultMaxTokens: 3000 });
 
   const concept = selectedConcept ? graph.nodes[selectedConcept] : null;
 
   // ── GENERATE QUIZ ──
+  // TA point 20: if Claude fails, say why (instead of an empty quiz) and offer "Try again"
   const generateQuiz = async () => {
+    setGenError("");
+    try { await makeEvalQuiz(); }
+    catch (e) { setQuestions([]); setGenError(e.message); setLoading(false); }
+  };
+  const makeEvalQuiz = async () => {
     setLoading(true); setPhase("quiz"); setAnswers({});
     const c = concept;
     const diffMap = {easy:"simple and foundational",medium:"moderately challenging",hard:"advanced and analytical"};
@@ -218,12 +221,13 @@ Difficulty: ${config.difficulty}${lectureBlock}${wantMcq ? "" : tb.text}`
         studentAnswer: answers[q.id] || ""
       }));
 
-      const raw = await callClaude(
+      let raw = "", gradeError = "";
+      try { raw = await callClaude(
         `You are grading descriptive answers. For each question, determine if student's answer is correct (1 point) or incorrect (0 points) based on whether it covers the key points. Return ONLY valid JSON:
 {"grades":[{"id":"desc_0","isCorrect":true,"points":1,"feedback":"Why correct or incorrect","correctAnswer":"What a good answer looks like"}]}`,
         `Grade these answers:
 ${JSON.stringify(gradingInput)}`
-      , 3000);
+      , 3000); } catch (e) { gradeError = e.message; }   // point 20: marking failed → answers shown as not marked, with the reason
 
       const parsed = exJSON(raw);
       if(parsed?.grades) {
@@ -241,7 +245,7 @@ ${JSON.stringify(gradingInput)}`
       } else {
         // Fallback if parsing fails
         descQs.forEach(q => {
-          gradedResults.push({...q, userAnswer: answers[q.id]||"", correctAnswer: q.sampleAnswer, isCorrect:false, points:0, feedback:"Could not grade automatically.", ungraded:true});
+          gradedResults.push({...q, userAnswer: answers[q.id]||"", correctAnswer: q.sampleAnswer, isCorrect:false, points:0, feedback:gradeError?`Could not grade automatically: ${gradeError}`:"Could not grade automatically.", ungraded:true});
         });
       }
     }
@@ -517,6 +521,8 @@ ${JSON.stringify(gradingInput)}`
 
         {loading ? (
           <div className="loading"><div className="spin"/><span>Evaluation in progress — generating questions...</span></div>
+        ) : genError ? (
+          <AiErrorBox message={genError} what="make the evaluation questions" onRetry={generateQuiz}/>
         ) : (
           <>
             <KeyCheckNote note={keyNote}/>

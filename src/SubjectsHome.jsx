@@ -1,12 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Ring from './Ring.jsx';
 import { ME, subjectAvg, MASTERY_THRESHOLD } from './utils.js';
-const SubjectsHome = ({ subjects, onSelect, onCreate }) => {
+const SubjectsHome = ({ subjects, onSelect, onCreate, onImport }) => {
   const subList = Object.values(subjects);
+  // TA point 20: open a subject someone exported, instead of uploading (and paying for) the same PDFs again
+  const fileRef = useRef(null);
+  const [notice, setNotice] = useState(null);
+  const pick = async (e) => {
+    const f = e.target.files?.[0]; e.target.value = "";
+    if (!f || !onImport) return;
+    try { setNotice({ ok: true, text: onImport(await f.text()) }); }
+    catch (err) { setNotice({ ok: false, text: err.message }); }
+  };
   return (
     <div className="fade">
       <div className="section-title">My Subjects</div>
       <div className="section-sub">Select a subject to study or create a new one</div>
+      {notice && (
+        <div className="import-notice" style={{marginBottom:16,padding:"10px 14px",borderRadius:10,fontSize:13,lineHeight:1.6,
+          background:notice.ok?"#f0fdf4":"#fef2f2",border:`1px solid ${notice.ok?"#bbf7d0":"#fecaca"}`,color:notice.ok?"#15803d":"#b91c1c"}}>
+          {notice.ok?"✅ ":"⚠ "}{notice.text}
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:20}}>
         {subList.map(sub=>{
           const avg=subjectAvg(sub);
@@ -38,6 +53,14 @@ const SubjectsHome = ({ subjects, onSelect, onCreate }) => {
           <div style={{fontSize:14,fontWeight:700,color:"var(--t3)"}}>New Subject</div>
           <div className="txs t4 tm" style={{textAlign:"center"}}>Upload lectures for a new topic</div>
         </div>
+        {onImport && (
+          <div className="new-subject-card import-subject" onClick={()=>fileRef.current?.click()}>
+            <div style={{fontSize:32,opacity:0.4}}>⬆</div>
+            <div style={{fontSize:14,fontWeight:700,color:"var(--t3)"}}>Import subject</div>
+            <div className="txs t4 tm" style={{textAlign:"center"}}>Open a subject file someone shared — no need to upload the PDFs again</div>
+            <input ref={fileRef} type="file" accept=".json,application/json" style={{display:"none"}} onChange={pick} onClick={e=>e.stopPropagation()}/>
+          </div>
+        )}
       </div>
     </div>
   );
