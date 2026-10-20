@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, exJSON, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt } from './retrieval.js';
-import { getMemory, analyseMistakes, applyMistakes } from './learnerMemory.js';
+import { getMemory, analyseAnswers, applyAnalysis } from './learnerMemory.js';
 import { NotedLine } from './MemoryBox.jsx';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
@@ -257,17 +257,19 @@ ${JSON.stringify(gradingInput)}`
     setPhase("results");
     setLoading(false);
 
-    // TA point 14: wrong answers → mistakes to remember (after the results are shown)
-    const wrong = graded.filter(r => !r.isCorrect && r.userAnswer && r.userAnswer !== "Not answered")
-      .map(r => ({ question: r.q, answer: r.userAnswer, correct: r.correctAnswer || "", explanation: r.feedback || "", screen: "evaluation" }));
-    if (!wrong.length) { setNoted(null); return; }
+    // TA points 14–15: wrong answers → mistakes to remember; right answers → can fix open mistakes (after the results are shown)
+    const asItem = r => ({ question: r.q, answer: r.userAnswer, correct: r.correctAnswer || "", explanation: r.feedback || "", screen: "evaluation" });
+    const wrong = graded.filter(r => !r.isCorrect && r.userAnswer && r.userAnswer !== "Not answered").map(asItem);
+    const right = graded.filter(r => r.isCorrect).map(asItem);
+    const cIdNow = selectedConcept;
+    const known = getMemory(subjRef.current, cIdNow).mistakes;
+    if (!wrong.length && !(right.length && known.some(k => k.status !== "fixed"))) { setNoted(null); return; }
     setNoted({ status: "working" });
     try {
-      const cIdNow = selectedConcept;
-      const analysed = await analyseMistakes(callClaude, c, wrong, getMemory(subjRef.current, cIdNow).mistakes);
-      const r = applyMistakes(subjRef.current, cIdNow, wrong, analysed, at);
+      const res = await analyseAnswers(callClaude, c, { wrong, right }, known);
+      const r = applyAnalysis(subjRef.current, cIdNow, wrong, res, at);
       commit(r.subject);
-      setNoted({ status: "done", items: r.noted });
+      setNoted({ status: "done", items: r.noted, fixed: r.fixed, progress: r.progress, hadWrong: wrong.length > 0 });
     } catch (e) { setNoted({ status: "failed", error: e.message }); }
   };
 

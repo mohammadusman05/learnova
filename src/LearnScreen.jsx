@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, exJSON, graphEngine, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
-import { getMemory, noteStudied, addChatMessages, analyseMistakes, applyMistakes } from './learnerMemory.js';
-import { MemoryBox, EarlierChat, NotedLine } from './MemoryBox.jsx';
+import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck } from './learnerMemory.js';
+import { MemoryBox, EarlierChat, NotedLine, ChatNoted } from './MemoryBox.jsx';
 
 // TA point 11: list the lecture passages a reply actually cited, e.g. "[S1] L01.pdf, p.6"
 const citedSources = (passages, reply) => sourcesOf(passages).filter(s => (reply || "").includes(`[${s.tag}]`));
@@ -173,8 +173,10 @@ Give a clear explanation with a practical real-world example.`,
         1000
       );
       const sources=citedSources(passages,reply);
-      setMessages(m=>[...m,{role:"ai",content:reply,sources}]);
+      const msgId=Date.now();
+      setMessages(m=>[...m,{role:"ai",content:reply,sources,id:msgId}]);
       commit(addChatMessages(subjRef.current,cId,[{role:"user",content:userMsg},{role:"ai",content:reply,sources}])); // point 14: chat is remembered
+      checkChat(userMsg,msgId); // point 15: does the question show a misunderstanding?
     }catch(e){
       setMessages(m=>[...m,{role:"ai",content:"Error: "+e.message}]);
       commit(addChatMessages(subjRef.current,cId,[{role:"user",content:userMsg}])); // the question is still remembered
@@ -185,17 +187,26 @@ Give a clear explanation with a practical real-world example.`,
   // TA point 11: the learner chooses where quiz questions come from, then the quiz is generated
   const startQuiz=()=>{ setPhase("quiz"); setQuiz(null); setQuizSetup(true); setNoted(null); };
 
-  // TA point 14: after a quiz, name the wrong idea behind each wrong answer (runs after the score is shown)
-  const noteMistakes=async(wrong,at)=>{
-    if(!wrong.length){ setNoted(null); return; }
+  // TA points 14–15: after a quiz, name the wrong idea behind wrong answers, and let right answers fix open mistakes
+  // (runs after the score is shown)
+  const noteAnswers=async(wrong,right,at)=>{
+    const known=getMemory(subjRef.current,cId).mistakes;
+    if(!wrong.length && !(right.length && known.some(k=>k.status!=="fixed"))){ setNoted(null); return; }
     setNoted({status:"working"});
     try{
-      const known=getMemory(subjRef.current,cId).mistakes;
-      const analysed=await analyseMistakes(callClaude,graph.nodes[cId],wrong,known);
-      const r=applyMistakes(subjRef.current,cId,wrong,analysed,at);
+      const res=await analyseAnswers(callClaude,graph.nodes[cId],{wrong,right},known);
+      const r=applyAnalysis(subjRef.current,cId,wrong,res,at);
       commit(r.subject);
-      setNoted({status:"done",items:r.noted});
+      setNoted({status:"done",items:r.noted,fixed:r.fixed,progress:r.progress,hadWrong:wrong.length>0});
     }catch(e){ setNoted({status:"failed",error:e.message}); }
+  };
+  // TA point 15: a chat question can show a misunderstanding too — noted under the reply
+  const checkChat=async(question,msgId)=>{
+    try{
+      const res=await checkChatQuestion(callClaude,graph.nodes[cId],question,getMemory(subjRef.current,cId).mistakes);
+      const r=applyChatCheck(subjRef.current,cId,question,res);
+      if(r.noted){ commit(r.subject); setMessages(m=>m.map(x=>x.id===msgId?{...x,noted:r.noted}:x)); }
+    }catch{ /* the chat itself still works; nothing is noted for this question */ }
   };
   const generateQuiz=async()=>{
     setQuizSetup(false); setLoading(true); setQuiz(null);
@@ -234,8 +245,10 @@ Give a clear explanation with a practical real-world example.`,
       const newGraph={...subject.graph,nodes:{...subject.graph.nodes,[cId]:{...subject.graph.nodes[cId],state:nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
       commit({...subjRef.current,mastery:newMastery,graph:newGraph,answerLog:[...(subjRef.current.answerLog||[]),...log]});
       setTimeout(()=>setPhase("result"),900);
-      // point 14: wrong answers → mistakes to remember
-      noteMistakes(quiz.map((q,i)=>({q,i})).filter(({q,i})=>sel[i]!==q.correct).map(({q,i})=>({question:q.q, answer:q.options?.[sel[i]]||"", correct:q.options?.[q.correct]||"", explanation:q.explanation, screen:"study"})), at);
+      // points 14–15: wrong answers → mistakes to remember; right answers → can fix open mistakes
+      const asItem=({q,i})=>({question:q.q, answer:q.options?.[sel[i]]||"", correct:q.options?.[q.correct]||"", explanation:q.explanation, screen:"study"});
+      const all=quiz.map((q,i)=>({q,i}));
+      noteAnswers(all.filter(({q,i})=>sel[i]!==q.correct).map(asItem), all.filter(({q,i})=>sel[i]===q.correct).map(asItem), at);
     };
     return (
       <div className="fade">
@@ -466,6 +479,7 @@ Give a clear explanation with a practical real-world example.`,
                   <div style={{fontSize:9,letterSpacing:"2px",color:"var(--t4)",fontFamily:"var(--mono)",marginBottom:6,fontWeight:700}}>🤖 AI TUTOR</div>
                   <div style={{whiteSpace:"pre-wrap"}}>{m.content}</div>
                   <SourcesList sources={m.sources}/>
+                  <ChatNoted noted={m.noted}/>
                 </div>
               </div>
             );

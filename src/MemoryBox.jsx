@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { getMemory, studyHistory, removeQuestion, removeMistake, clearChat, RECURRING } from './learnerMemory.js';
+import { getMemory, studyHistory, removeQuestion, removeMistake, clearChat, memorySummary, RECURRING, FIX_AFTER } from './learnerMemory.js';
 
 // ============================================================
-// TA point 14 — "What Learnova remembers" box and the earlier conversation, shown on each concept
+// TA points 14–15 — "What Learnova remembers" box and the earlier conversation, shown on each concept
 // ============================================================
 const day = (t) => new Date(t).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 const X = ({ onClick, title }) => (
@@ -19,15 +19,22 @@ const Row = ({ label, children }) => (
 export const MemoryBox = ({ subject, cId, onChange }) => {
   const [open, setOpen] = useState(true);
   const [allQs, setAllQs] = useState(false);
+  const [showUse, setShowUse] = useState(false);
   const m = getMemory(subject, cId);
   const hist = studyHistory(subject, cId);
-  const recurring = m.mistakes.filter(x => x.count >= RECURRING).sort((a, b) => b.count - a.count || b.lastSeen - a.lastSeen);
-  const once = m.mistakes.filter(x => x.count < RECURRING).sort((a, b) => b.lastSeen - a.lastSeen);
+  const openList = m.mistakes.filter(x => x.status !== "fixed");
+  const recurring = openList.filter(x => x.count >= RECURRING).sort((a, b) => b.count - a.count || b.lastSeen - a.lastSeen);
+  const once = openList.filter(x => x.count < RECURRING).sort((a, b) => b.lastSeen - a.lastSeen);
+  const fixed = m.mistakes.filter(x => x.status === "fixed").sort((a, b) => (b.fixedAt || 0) - (a.fixedAt || 0));
+  const use = memorySummary(subject, cId).text;   // point 15: only what is relevant to this concept
+  const progress = (x) => x.corrections > 0 ? <span className="t4" style={{ fontSize: 11 }}> · {x.corrections} of {FIX_AFTER} correct answers towards fixed</span> : null;
+  const back = (x) => x.reopenedAt ? <span className="t4" style={{ fontSize: 11 }}> · back again {day(x.reopenedAt)}</span> : null;
   const qs = m.questions.map((q, i) => ({ ...q, i })).reverse();
   const shownQs = allQs ? qs : qs.slice(0, 5);
   const nothing = !m.studied.length && !hist.length && !m.questions.length && !m.mistakes.length;
   const summary = [m.studied.length ? `studied ${m.studied.length}×` : "", hist.length ? `${hist.length} quiz${hist.length !== 1 ? "zes" : ""}` : "",
-    m.questions.length ? `${m.questions.length} question${m.questions.length !== 1 ? "s" : ""}` : "", m.mistakes.length ? `${m.mistakes.length} mistake${m.mistakes.length !== 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
+    m.questions.length ? `${m.questions.length} question${m.questions.length !== 1 ? "s" : ""}` : "", openList.length ? `${openList.length} open mistake${openList.length !== 1 ? "s" : ""}` : "",
+    fixed.length ? `${fixed.length} fixed` : ""].filter(Boolean).join(" · ");
 
   return (
     <div className="card mb20 memory-box" style={{ padding: "14px 18px", borderColor: "#ddd6fe", background: "#faf8ff" }}>
@@ -58,7 +65,7 @@ export const MemoryBox = ({ subject, cId, onChange }) => {
             <Row label="RECURRING MISTAKES">
               {recurring.map(x => (
                 <div key={x.id} className="f ac jb" style={{ gap: 6 }}>
-                  <span><b style={{ color: "#b91c1c" }}>{x.text}</b> <span className="tag" style={{ fontSize: 9, marginLeft: 4, background: "#fef2f2", color: "#b91c1c", borderColor: "#fecaca" }}>SEEN {x.count}×</span></span>
+                  <span><b style={{ color: "#b91c1c" }}>{x.text}</b> <span className="tag" style={{ fontSize: 9, marginLeft: 4, background: "#fef2f2", color: "#b91c1c", borderColor: "#fecaca" }}>SEEN {x.count}×</span>{progress(x)}{back(x)}</span>
                   {onChange && <X title="This is not right — forget it" onClick={() => onChange(removeMistake(subject, cId, x.id))} />}
                 </div>
               ))}
@@ -68,12 +75,33 @@ export const MemoryBox = ({ subject, cId, onChange }) => {
             <Row label="MISTAKES SEEN ONCE">
               {once.map(x => (
                 <div key={x.id} className="f ac jb" style={{ gap: 6 }}>
-                  <span>{x.text} <span className="t4" style={{ fontSize: 11 }}>{day(x.lastSeen)}</span></span>
+                  <span>{x.text} <span className="t4" style={{ fontSize: 11 }}>{day(x.lastSeen)}</span>{progress(x)}{back(x)}</span>
                   {onChange && <X title="This is not right — forget it" onClick={() => onChange(removeMistake(subject, cId, x.id))} />}
                 </div>
               ))}
             </Row>
           )}
+          {fixed.length > 0 && (
+            <Row label="✓ FIXED">
+              {fixed.map(x => (
+                <div key={x.id} className="f ac jb" style={{ gap: 6 }}>
+                  <span style={{ color: "#15803d" }}>✓ {x.text} <span className="t4" style={{ fontSize: 11 }}>fixed {day(x.fixedAt)} · was seen {x.count}×</span></span>
+                  {onChange && <X title="Forget this" onClick={() => onChange(removeMistake(subject, cId, x.id))} />}
+                </div>
+              ))}
+            </Row>
+          )}
+          <Row label="WHAT THE TUTOR WILL USE">
+            <button className="btn btn-ghost btn-xs what-tutor-uses" style={{ padding: "2px 0" }} onClick={() => setShowUse(v => !v)}>
+              {showUse ? "▼ Hide" : "▶ Show"} {use ? "" : "(nothing yet)"}
+            </button>
+            {showUse && (
+              <div className="tutor-uses" style={{ marginTop: 4, padding: "8px 10px", borderRadius: 8, background: "#fff", border: "1px dashed #c4b5fd", fontSize: 12, fontFamily: "var(--mono)", whiteSpace: "pre-wrap", color: "var(--t2)" }}>
+                {use || "Nothing yet — open mistakes, recent questions, the last score and weak prerequisites will be used here."}
+                <div className="t4" style={{ marginTop: 6, fontFamily: "var(--sans)", fontSize: 11 }}>Only this concept and its weak prerequisites — not other concepts, fixed mistakes or old chat.</div>
+              </div>
+            )}
+          </Row>
         </>
       )}
     </div>
@@ -117,13 +145,23 @@ export const NotedLine = ({ noted }) => {
   const box = (children) => (
     <div className="noted-line" style={{ margin: "16px auto 0", maxWidth: 640, textAlign: "left", padding: "10px 14px", borderRadius: 10, background: "#faf8ff", border: "1px solid #ddd6fe", fontSize: 13, color: "var(--t2)", lineHeight: 1.6 }}>{children}</div>
   );
-  if (noted.status === "working") return box(<span className="t3">📝 Looking at your wrong answers to note what to work on…</span>);
+  if (noted.status === "working") return box(<span className="t3">📝 Looking at your answers to update what Learnova remembers…</span>);
   if (noted.status === "failed") return box(<span className="t3">📝 Could not analyse your mistakes this time ({noted.error}). Your answers are still saved.</span>);
-  if (!noted.items?.length) return box(<span className="t3">📝 No clear misunderstanding found in your wrong answers — likely slips.</span>);
+  const items = noted.items || [], fixed = noted.fixed || [], progress = noted.progress || [];
+  if (!items.length && !fixed.length && !progress.length) return noted.hadWrong ? box(<span className="t3">📝 No clear misunderstanding found in your wrong answers — likely slips.</span>) : null;
   return box(<>
     <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", letterSpacing: "1.5px", color: "#7c3aed", marginBottom: 4 }}>📝 LEARNOVA NOTED</div>
-    {noted.items.map((x, i) => (
-      <div key={i}>• {x.text}{x.count >= RECURRING ? <b style={{ color: "#b91c1c" }}> — seen {x.count}× (recurring)</b> : ""}</div>
+    {items.map((x, i) => (
+      <div key={i}>• {x.text}{x.reopened ? <b style={{ color: "#b91c1c" }}> — back again</b> : ""}{x.count >= RECURRING ? <b style={{ color: "#b91c1c" }}> — seen {x.count}× (recurring)</b> : ""}</div>
     ))}
+    {fixed.map((t, i) => <div key={`f${i}`} style={{ color: "#15803d" }}>✓ Fixed: {t}</div>)}
+    {progress.map((x, i) => <div key={`p${i}`} className="t3">↗ {x.corrections} of {FIX_AFTER} correct answers towards fixing: {x.text}</div>)}
   </>);
 };
+
+// point 15: small note under a chat reply when the question showed a misunderstanding
+export const ChatNoted = ({ noted }) => !noted ? null : (
+  <div className="chat-noted" style={{ marginTop: 8, fontSize: 11, color: "#7c3aed", fontFamily: "var(--mono)" }}>
+    📝 Learnova noted: {noted.text}{noted.isNew ? "" : noted.reopened ? " — back again" : ` — seen ${noted.count}×`}
+  </div>
+);
