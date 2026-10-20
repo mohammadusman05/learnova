@@ -80,6 +80,7 @@ const App = () => {
   },[subjects]); // null = subjects home
   const [screen,setScreen]=useState("home"); // home | dashboard | upload | graph | learn | eval
   const [learnId,setLearnId]=useState(null);
+  const [learnMode,setLearnMode]=useState(null); // point 17: "revise" opens a revision quiz directly
   const [evalConceptId,setEvalConceptId]=useState(null);
   const [showNewSubject,setShowNewSubject]=useState(false);
 
@@ -111,9 +112,10 @@ const App = () => {
     setLearnId(null);
   };
 
-  const navigate = (s, id=null) => {
+  const navigate = (s, id=null, mode=null) => {
     setScreen(s);
     if(id) setLearnId(id);
+    setLearnMode(mode);
   };
 
   const total = activeSubject ? Object.keys(activeSubject.graph.nodes).length : 0;
@@ -190,7 +192,7 @@ const App = () => {
               <div className="nav-label">NAVIGATE</div>
               {nav.map(item=>(
                 <div key={item.id} className={`nav-item ${screen===item.id?"active":""}`}
-                  onClick={()=>{setScreen(item.id);if(item.id!=="learn")setLearnId(null);if(item.id==="eval"){setEvalConceptId(null);}}}>
+                  onClick={()=>{setScreen(item.id);setLearnMode(null);if(item.id!=="learn")setLearnId(null);if(item.id==="eval"){setEvalConceptId(null);}}}>
                   <span className="nav-icon">{item.icon}</span>{item.label}
                 </div>
               ))}
@@ -239,7 +241,7 @@ const App = () => {
             {screen==="upload"&&activeSubject&&<UploadScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey}/>}
             {screen==="library"&&activeSubject&&<LibraryScreen subject={activeSubject}/>}
             {screen==="graph"&&activeSubject&&<GraphScreen subject={activeSubject} onSelect={id=>navigate("learn",id)} onUpdate={updateSubject} apiKey={apiKey}/>}
-            {screen==="learn"&&activeSubject&&<LearnScreen key={learnId} subject={activeSubject} onUpdate={updateSubject} initialId={learnId} apiKey={apiKey} onGoToEval={(cId)=>{setEvalConceptId(cId);setScreen("eval");}}/>}
+            {screen==="learn"&&activeSubject&&<LearnScreen key={`${learnId}|${learnMode||""}`} subject={activeSubject} onUpdate={updateSubject} initialId={learnId} initialMode={learnMode} apiKey={apiKey} onGoToEval={(cId)=>{setEvalConceptId(cId);setScreen("eval");}}/>}
             {screen==="eval"&&activeSubject&&<EvalScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey} initialConceptId={evalConceptId} onClearConcept={()=>setEvalConceptId(null)}/>}
           </div>
         </div>

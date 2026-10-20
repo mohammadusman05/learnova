@@ -5,6 +5,7 @@ import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck } from './learnerMemory.js';
 import { MemoryBox, EarlierChat, NotedLine, ChatNoted, PersonalisationSwitch, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
+import { scheduleAfterQuiz, dueList, nextRevisionLabel, revisionTargets, getSchedule } from './revision.js';
 
 // TA point 11: list the lecture passages a reply actually cited, e.g. "[S1] L01.pdf, p.6"
 const citedSources = (passages, reply) => sourcesOf(passages).filter(s => (reply || "").includes(`[${s.tag}]`));
@@ -18,7 +19,7 @@ const SourcesList = ({ sources, color = "#2563eb", border = "#bfdbfe" }) => (sou
     ))}
   </div>
 ) : null);
-const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
+const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoToEval }) => {
   const {graph,mastery}=subject;
   const [cId,setCId]=useState(initialId||null);
   const [phase,setPhase]=useState(initialId?"loading":"select");
@@ -39,11 +40,14 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const [noted,setNoted]=useState(null);                     // point 14: mistakes noted after a quiz
   const [quizReview,setQuizReview]=useState([]);             // point 16: which quiz questions checked an earlier mix-up
   const [quizPersonalised,setQuizPersonalised]=useState(false);
+  const [revisionMode,setRevisionMode]=useState(false);       // point 17: this quiz is a revision
+  const [revisionResult,setRevisionResult]=useState("");
   const subjRef=useRef(subject); subjRef.current=subject;    // newest subject, for saves that finish after a Claude call
   const commit=(updated)=>{ subjRef.current=updated; onUpdate(updated); };
   const bottomRef=useRef();
   const msgContainerRef=useRef();
   const ready=graphEngine.getReadyConcepts(graph,mastery);
+  const due=dueList(subject); // point 17
   const all=Object.values(graph.nodes);
 
   const callClaude=async(sys,usr,mt=1500,temperature)=>{
@@ -54,7 +58,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const updateMastery=(id,val)=>{ onUpdate({...subject,mastery:{...subject.mastery,[id]:val}}); };
   const updateGraph=(newGraph)=>{ onUpdate({...subject,graph:newGraph}); };
 
-  useEffect(()=>{if(initialId)startLearning(initialId);},[]);
+  useEffect(()=>{if(initialId){ if(initialMode==="revise") startRevision(initialId); else startLearning(initialId); }},[]);
   // ...
 
   // ...
@@ -199,7 +203,14 @@ Give a clear explanation with a practical real-world example.`,
   };
 
   // TA point 11: the learner chooses where quiz questions come from, then the quiz is generated
-  const startQuiz=()=>{ setPhase("quiz"); setQuiz(null); setQuizSetup(true); setNoted(null); setQuizReview([]); };
+  const startQuiz=()=>{ setPhase("quiz"); setQuiz(null); setQuizSetup(true); setNoted(null); setQuizReview([]); setRevisionMode(false); setRevisionResult(""); };
+  // TA point 17: a short revision quiz on one concept — 3 questions aimed at its weak spots
+  const startRevision=(id)=>{
+    const c=graph.nodes[id]; if(!c) return;
+    setCId(id); setMessages([]); setSessionStart(Date.now()); setSourcesReady(false);
+    setPhase("quiz"); setQuiz(null); setQuizSetup(false); setNoted(null); setQuizReview([]); setRevisionMode(true); setRevisionResult("");
+    generateQuiz({id, revision:true});
+  };
 
   // TA points 14–15: after a quiz, name the wrong idea behind wrong answers, and let right answers fix open mistakes
   // (runs after the score is shown)
@@ -222,23 +233,24 @@ Give a clear explanation with a practical real-world example.`,
       if(r.noted){ commit(r.subject); setMessages(m=>m.map(x=>x.id===msgId?{...x,noted:r.noted}:x)); }
     }catch{ /* the chat itself still works; nothing is noted for this question */ }
   };
-  const generateQuiz=async()=>{
+  const generateQuiz=async(opts={})=>{
     setQuizSetup(false); setLoading(true); setQuiz(null);
-    const c=graph.nodes[cId];
+    const id=opts.id||cId, revision=!!opts.revision;
+    const c=graph.nodes[id];
     const hasDocs=!!c&&(subject.docs||[]).some(d=>conceptDocIds(c).includes(d.id));
-    let source=quizSource==="lecture"&&hasDocs?"lecture":"general";
+    let source=(revision||quizSource==="lecture")&&hasDocs?"lecture":"general";
     let lecture="";
     if(source==="lecture"){
       const {passages}=await retrieve(subject,c,{k:5,maxChars:5000});
       if(passages.length) lecture=passagesForPrompt(passages); else source="general";
     }
     // TA point 16: up to 2 of the 3 questions aim at the learner's open mistakes (when personalisation is on)
-    const tb=targetBlock(subjRef.current,cId,2,"mcq");
+    const tb=revision?revisionTargets(subjRef.current,id):targetBlock(subjRef.current,id,2,"mcq"); // point 17: revision aims at weak spots
     const raw=await callClaude(
       `Generate 3 MCQ questions. Return ONLY JSON:\n{"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why correct"}]}`,
       (source==="lecture"
-        ? `Create 3 quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name}).\nEvery question must be about "${c?.name}" and answerable from these lecture passages only. Ignore any passage that is not about "${c?.name}".\n\n${lecture}`
-        : `Create 3 quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name})`)+tb.text
+        ? `Create 3 ${revision?"revision ":""}quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name}).\nEvery question must be about "${c?.name}" and answerable from these lecture passages only. Ignore any passage that is not about "${c?.name}".\n\n${lecture}`
+        : `Create 3 ${revision?"revision ":""}quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name})`)+tb.text
     );
     const parsed=exJSON(raw);setQuiz(resolveTargets(parsed?.questions||[],tb.targets));setQuizUsedSource(source);setQuizPersonalised(isPersonalised(subjRef.current));setLoading(false);
   };
@@ -256,14 +268,21 @@ Give a clear explanation with a practical real-world example.`,
       const old=subject.mastery[cId]||0;
       const {mastery:nw, steps}=applyAnswers(old, quiz.map((q,i)=>({correct:sel[i]===q.correct, type:"mcq"})));
       const at=Date.now();
-      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, picked:quiz[i].options?.[sel[i]], correct:s.correct, type:"mcq", screen:"study", questionSource:quizUsedSource, personalised:quizPersonalised, targetedMistake:quiz[i].targetText||"", at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
+      const screen=revisionMode?"revision":"study";
+      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, picked:quiz[i].options?.[sel[i]], correct:s.correct, type:"mcq", screen, questionSource:quizUsedSource, personalised:quizPersonalised, targetedMistake:quiz[i].targetText||"", at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
       setQuizReview(quiz.map((q,i)=>({n:i+1,targetText:q.targetText,correct:sel[i]===q.correct})).filter(x=>x.targetText));
       const newMastery={...subject.mastery,[cId]:nw};
       const newGraph={...subject.graph,nodes:{...subject.graph.nodes,[cId]:{...subject.graph.nodes[cId],state:nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
-      commit({...subjRef.current,mastery:newMastery,graph:newGraph,answerLog:[...(subjRef.current.answerLog||[]),...log]});
+      // point 17: every quiz moves the revision schedule (passed → longer gap, failed → back tomorrow)
+      const updated=scheduleAfterQuiz({...subjRef.current,mastery:newMastery,graph:newGraph,answerLog:[...(subjRef.current.answerLog||[]),...log]},cId,{at,pct,screen});
+      commit(updated);
+      const sch=getSchedule(updated,cId);
+      setRevisionResult(revisionMode
+        ? (sch.lastResult==="passed"?"📅 Revision passed.":"📅 Revision not passed — it will come back tomorrow.")
+        : "");
       setTimeout(()=>setPhase("result"),900);
       // points 14–15: wrong answers → mistakes to remember; right answers → can fix open mistakes
-      const asItem=({q,i})=>({question:q.q, answer:q.options?.[sel[i]]||"", correct:q.options?.[q.correct]||"", explanation:q.explanation, screen:"study", targetId:q.targetId});
+      const asItem=({q,i})=>({question:q.q, answer:q.options?.[sel[i]]||"", correct:q.options?.[q.correct]||"", explanation:q.explanation, screen, targetId:q.targetId});
       const all=quiz.map((q,i)=>({q,i}));
       noteAnswers(all.filter(({q,i})=>sel[i]!==q.correct).map(asItem), all.filter(({q,i})=>sel[i]===q.correct).map(asItem), at);
     };
@@ -291,6 +310,22 @@ Give a clear explanation with a practical real-world example.`,
       {!all.length
         ? <div className="empty"><div className="empty-icon">📚</div><div className="ts t3">Upload a lecture first to generate concepts</div></div>
         : <>
+          {/* TA point 17: concepts due for revision, most urgent first */}
+          {due.length>0&&<>
+            <div className="f ac g12 mb8">
+              <div className="card-label" style={{margin:0,color:"#0369a1"}}>📅 DUE FOR REVISION</div>
+              <div style={{fontSize:11,color:"#0369a1",fontFamily:"var(--mono)",padding:"3px 10px",background:"#f0f9ff",borderRadius:20,border:"1px solid #bae6fd"}}>short review quizzes on your weak spots</div>
+            </div>
+            <div className="gauto mb24 due-list">
+              {due.map(d=>(
+                <div key={d.id} className="cc" style={{borderColor:"#bae6fd",background:"#f8fcff"}}>
+                  <div className="f jb ac mb8"><div className="cc-name">{d.name}</div><div className="tag" style={{background:"#e0f2fe",color:"#0369a1",borderColor:"#7dd3fc",fontSize:9}}>{d.overdueDays>0?`${d.overdueDays}D OVERDUE`:"DUE"}</div></div>
+                  {d.reasons.slice(0,2).map((r,i)=><div key={i} className="cc-def" style={{marginBottom:2}}>• {r}</div>)}
+                  <button className="btn btn-primary btn-sm mt8" onClick={()=>startRevision(d.id)}>Revise →</button>
+                </div>
+              ))}
+            </div>
+          </>}
           {ready.length>0&&<>
             <div className="f ac g12 mb8">
               <div className="card-label" style={{margin:0}}>⚡ READY TO LEARN</div>
@@ -368,6 +403,10 @@ Give a clear explanation with a practical real-world example.`,
           </div>
           <div className="section-title">{concept?.name}</div>
           <div className="section-sub">{concept?.definition}</div>
+          {nextRevisionLabel(subject,cId)&&<div className="f ac g8 mt8 concept-revision">
+            <span className="txs tm" style={{color:"#0369a1"}}>📅 {nextRevisionLabel(subject,cId)}</span>
+            <button className="btn btn-secondary btn-xs" onClick={()=>startRevision(cId)}>Revise now</button>
+          </div>}
         </div>
         <div className="f ac g8">
           <PersonalisationSwitch subject={subject} onChange={commit}/>
@@ -557,6 +596,8 @@ Give a clear explanation with a practical real-world example.`,
           <div className="score-big">{score}%</div>
           <div style={{fontSize:20,fontWeight:800,marginBottom:8,marginTop:12,color:"var(--t1)"}}>{score>=80?"Excellent work! 🎉":score>=60?"Good effort! 📚":"Keep practising! 💪"}</div>
           <div className="ts t3 mb24 tm">Updated mastery: <span style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{subject.mastery[cId]||0}%</span>{" · "}{(subject.mastery[cId]||0)>=MASTERY_THRESHOLD?"Concept Mastered ✓":"Needs more practice"}</div>
+          {revisionResult&&<div className="revision-result ts" style={{color:"#0369a1",fontWeight:700,marginTop:-12,marginBottom:8}}>{revisionResult}</div>}
+          <div className="next-revision txs t3 tm">{nextRevisionLabel(subject,cId)}</div>
           <NotedLine noted={noted}/>
           <TargetedReview items={quizReview}/>
           <div className="mb24"/>

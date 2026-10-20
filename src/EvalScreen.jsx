@@ -5,6 +5,7 @@ import { retrieve, passagesForPrompt } from './retrieval.js';
 import { getMemory, analyseAnswers, applyAnalysis } from './learnerMemory.js';
 import { NotedLine, PersonalisationSwitch, TargetTag } from './MemoryBox.jsx';
 import { isPersonalised, targetBlock, resolveTargets } from './personalise.js';
+import { scheduleAfterQuiz } from './revision.js';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
   return (
@@ -258,7 +259,8 @@ ${JSON.stringify(gradingInput)}`
     const newMastery = {...subject.mastery, [selectedConcept]: nw};
     const newGraph = {...subject.graph, nodes:{...subject.graph.nodes,[selectedConcept]:{...subject.graph.nodes[selectedConcept],state: nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
 
-    commit({...subject, mastery:newMastery, graph:newGraph, evalHistory:{...existing,[selectedConcept]:newHistory}, answerLog:[...(subject.answerLog||[]), ...log]});
+    // point 17: an evaluation also moves the revision schedule
+    commit(scheduleAfterQuiz({...subject, mastery:newMastery, graph:newGraph, evalHistory:{...existing,[selectedConcept]:newHistory}, answerLog:[...(subject.answerLog||[]), ...log]}, selectedConcept, { at, pct, screen: "evaluation" }));
     setResults({...attempt});
     setPhase("results");
     setLoading(false);
