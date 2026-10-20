@@ -168,6 +168,7 @@ const App = () => {
     {id:"dashboard",icon:"◈",label:"Dashboard"},
     {id:"library",icon:"◫",label:"Library"},
     {id:"chat",icon:"💬",label:"AI Chat"},
+    {id:"eval",icon:"✦",label:"Evaluation"},
   ]:[
     {id:"dashboard",icon:"◈",label:"Dashboard"},
     {id:"upload",icon:"⊕",label:"Ingest Content"},
@@ -313,13 +314,13 @@ const App = () => {
             {screen==="home"&&<SubjectsHome subjects={subjects} onSelect={selectSubject} onCreate={()=>setShowNewSubject(true)} onImport={importShared}/>}
             {screen==="dashboard"&&activeSubject&&<Dashboard subject={activeSubject} onNavigate={navigate} onUpdate={updateSubject}/>}
             {/* Plain AI chat mode: Learnova's own screens are replaced by the AI Chat page */}
-            {activeSubject&&plainNow&&["chat","upload","graph","learn","eval"].includes(screen)&&<PlainChatScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey}/>}
+            {activeSubject&&plainNow&&["chat","upload","graph","learn"].includes(screen)&&<PlainChatScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey}/>}
             {screen==="chat"&&activeSubject&&!plainNow&&<Dashboard subject={activeSubject} onNavigate={navigate} onUpdate={updateSubject}/>}
             {!plainNow&&screen==="upload"&&activeSubject&&<UploadScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey}/>}
             {screen==="library"&&activeSubject&&<LibraryScreen subject={activeSubject}/>}
             {!plainNow&&screen==="graph"&&activeSubject&&<GraphScreen subject={activeSubject} onSelect={id=>navigate("learn",id)} onUpdate={updateSubject} apiKey={apiKey}/>}
             {!plainNow&&screen==="learn"&&activeSubject&&<LearnScreen key={`${learnId}|${learnMode||""}|${learnReset}`} subject={activeSubject} onUpdate={updateSubject} initialId={learnId} initialMode={learnMode} apiKey={apiKey} onGoToEval={(cId)=>{setEvalConceptId(cId);setScreen("eval");}}/>}
-            {!plainNow&&screen==="eval"&&activeSubject&&<EvalScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey} initialConceptId={evalConceptId} onClearConcept={()=>setEvalConceptId(null)}/>}
+            {screen==="eval"&&activeSubject&&<EvalScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey} initialConceptId={evalConceptId} onClearConcept={()=>setEvalConceptId(null)}/>}
           </div>
         </div>
       </div>

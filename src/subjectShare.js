@@ -1,6 +1,7 @@
 // ============================================================
 // SHARE A SUBJECT (TA point 20 — upload once instead of once per learner)
-// Export: the lectures (their text and page numbers), concepts and prerequisite links of one subject, as a .json file.
+// Export: the lectures (their text and page numbers), concepts and prerequisite links of one subject, and the
+// faculty's uploaded test (point 23), as a .json file.
 // NEVER exported: mastery, reading progress, answers, chats, mistakes, revision schedule, lecture-check log,
 // saved explanations, learner code or API key — those stay in each learner's own browser.
 // Import: a new subject, or — when the same subject was imported before — an update that keeps the learner's progress.
@@ -30,6 +31,7 @@ export const exportSubject = (subject, now = Date.now()) => {
       id: subject.id, name: subject.name, emoji: subject.emoji || "📘", createdAt: subject.createdAt || null,
       docs: (subject.docs || []).map(d => ({ ...d })),
       graph: { ...g, nodes, edges: [...(g.edges || [])], removedLinks: [...(g.removedLinks || [])] },
+      ...(subject.test ? { test: subject.test } : {}),   // point 23: the faculty's uploaded test (questions only, no results)
     },
   };
 };
@@ -67,6 +69,7 @@ export const importSubject = (subjects, data, now = Date.now()) => {
       docs: s.docs.map(d => ({ ...d })),
       graph: { ...s.graph, nodes: Object.fromEntries(Object.entries(s.graph.nodes).map(([id, n]) => [id, sharedNode(n)])), edges: [...(s.graph.edges || [])], removedLinks: [...(s.graph.removedLinks || [])] },
       mastery: {}, importedFrom: { exportedAt: data.exportedAt || null, importedAt: now },
+      ...(s.test ? { test: s.test } : {}),
     };
     counts.newDocs = counts.docs; counts.newConcepts = counts.concepts;
     return { subjects: all, id: s.id, mode: "new", counts };
@@ -91,6 +94,6 @@ export const importSubject = (subjects, data, now = Date.now()) => {
     edges: [...(s.graph.edges || []), ...(lg.edges || []).filter(touchesOwn)],
     removedLinks: [...(s.graph.removedLinks || []), ...(lg.removedLinks || []).filter(touchesOwn)],
   };
-  all[s.id] = { ...local, docs, graph, importedFrom: { exportedAt: data.exportedAt || null, importedAt: now } };
+  all[s.id] = { ...local, docs, graph, importedFrom: { exportedAt: data.exportedAt || null, importedAt: now }, ...(s.test ? { test: s.test } : {}) };
   return { subjects: all, id: s.id, mode: "updated", counts };
 };

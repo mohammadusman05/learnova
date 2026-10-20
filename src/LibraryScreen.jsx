@@ -3,6 +3,7 @@ import { ME, MASTERY_THRESHOLD, answerLogCsv } from './utils.js';
 import { faithCsv, faithSummary } from './faithfulness.js';
 import { exportSubject, shareFileName } from './subjectShare.js';
 import { plainChatCsv, chatSummary } from './plainChat.js';
+import { testResultsCsv, testSummary, getTest } from './testSet.js';
 const LibraryScreen = ({ subject }) => {
   const docs = subject.docs || [];
   const answerCount = (subject.answerLog || []).length;
@@ -38,6 +39,18 @@ const LibraryScreen = ({ subject }) => {
     const slug = (subject.name || "subject").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const d = new Date();
     a.href = url; a.download = `learnova-plain-chat-${slug}-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  // TA point 23: pre-test, post-test and normalised gain of the uploaded test
+  const ts = testSummary(subject), test = getTest(subject), nAttempts = (subject.testAttempts || []).length;
+  const downloadTestResults = () => {
+    const blob = new Blob(["\uFEFF" + testResultsCsv(subject)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = (subject.name || "subject").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const d = new Date();
+    a.href = url; a.download = `learnova-test-results-${slug}-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -191,6 +204,21 @@ const LibraryScreen = ({ subject }) => {
           <button className="btn btn-secondary btn-sm download-faith" onClick={downloadFaith} disabled={!(subject.faithLog||[]).length}>⬇ Faithfulness CSV</button>
         </div>
       </div>
+      {(test || nAttempts > 0) && (
+        <div className="card mt16 test-results-card">
+          <div className="f ac jb" style={{gap:12,flexWrap:"wrap"}}>
+            <div>
+              <div className="card-label" style={{margin:0}}>📋 UPLOADED TEST RESULTS</div>
+              <div className="txs t3 tm" style={{marginTop:4}}>
+                {ts.pre === null ? "No attempts yet — take the test in Evaluation (your first attempt is your pre-test)"
+                  : ts.post === null ? `Pre-test ${ts.pre}% — post-test not taken yet`
+                  : `Pre-test ${ts.pre}% → Post-test ${ts.post}% · normalised gain ${ts.gain === null ? "n/a" : ts.gain.toFixed(2)}${ts.preBeforeStudy === false ? " · ⚠ pre-test taken after studying" : ""}`}
+              </div>
+            </div>
+            <button className="btn btn-secondary btn-sm download-test-results" onClick={downloadTestResults} disabled={!nAttempts}>⬇ Test results CSV</button>
+          </div>
+        </div>
+      )}
       {cs.questions > 0 && (
         <div className="card mt16 plain-chat-card">
           <div className="f ac jb" style={{gap:12,flexWrap:"wrap"}}>

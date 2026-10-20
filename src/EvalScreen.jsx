@@ -4,7 +4,8 @@ import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt } from './retrieval.js';
 import { getMemory, analyseAnswers, applyAnalysis, autoGroup, remapNoted } from './learnerMemory.js';
 import { NotedLine, StudyModeTag, TargetTag } from './MemoryBox.jsx';
-import { isAdaptive } from './studyMode.js';
+import { isAdaptive, isPlain } from './studyMode.js';
+import UploadedTest from './UploadedTest.jsx';
 import { isPersonalised, targetBlock, resolveTargets } from './personalise.js';
 import { scheduleAfterQuiz } from './revision.js';
 import { LECTURE_GUARD } from './privacy.js';
@@ -94,6 +95,7 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
   const [results, setResults] = useState(null);
   const [noted, setNoted] = useState(null);
   const [genError, setGenError] = useState(""); // point 20: why the questions could not be made
+  const [testActive, setTestActive] = useState(false); // point 23: taking the uploaded test
   const [keyNote, setKeyNote] = useState(null); // point 19: MCQ answer keys checked against the lecture                       // point 14: mistakes noted after an evaluation
   const subjRef = useRef(subject); subjRef.current = subject;     // newest subject, for saves that finish after a Claude call
   const commit = (updated) => { subjRef.current = updated; onUpdate(updated); };
@@ -321,11 +323,17 @@ ${JSON.stringify(gradingInput)}`
   // ────────────────────────────────────────────
   // PHASE: SELECT CONCEPT
   // ────────────────────────────────────────────
+  // TA point 23: the faculty's uploaded test sits at the top; while it is being taken it fills the page
+  const testCard = <UploadedTest subject={subject} onUpdate={commit} onActive={setTestActive}/>;
+  // (the card keeps the same place in the page in every state, so starting the test never resets it)
+  const plain = isPlain(subject);
   if(phase === "select") return (
     <div className="fade">
-      <div className="section-title">Evaluation</div>
-      <div className="section-sub">Select a concept to be evaluated on</div>
-      {concepts.length === 0
+      {!testActive && <div className="section-title">Evaluation</div>}
+      {!testActive && <div className="section-sub">{plain ? "Plain AI chat mode — only the uploaded test is available here" : "Take the uploaded test, or select a concept to be evaluated on"}</div>}
+      {testCard}
+      {!testActive && !plain && <div className="card-label mb8">CONCEPT QUIZZES</div>}
+      {(testActive || plain) ? null : concepts.length === 0
         ? <div className="empty">
             <div className="empty-icon">📖</div>
             <div style={{fontSize:14,color:"var(--t3)",marginBottom:8}}>No concepts ready for evaluation yet</div>
