@@ -6,7 +6,7 @@ import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis,
 import { MemoryBox, EarlierChat, NotedLine, ChatNoted, PersonalisationSwitch, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
 import { LECTURE_GUARD } from './privacy.js';
-import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerSystem } from './faithfulness.js';
+import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerSystem, filterToLecture } from './faithfulness.js';
 import { FaithBadge, KeyCheckNote } from './FaithBadge.jsx';
 import { scheduleAfterQuiz, dueList, nextRevisionLabel, revisionTargets, getSchedule } from './revision.js';
 
@@ -127,7 +127,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
       const wantDoc=sourceChoice.doc&&hasDocs;
       const wantKb=sourceChoice.kb||!wantDoc;   // "Document only" but no document → general knowledge, with a note
       const out=[];
-      let docPassages=[], docMsgId=null;
+      let docMsgId=null, docCheck=null;
       // TA point 16: a personal note ("For you" + quick recap of weak prerequisites) is prepared alongside the explanation
       const notePromise=personalNote(callClaude,subjRef.current,cId,{useLecture:wantDoc}).catch(e=>({error:e.message}));
       if(sourceChoice.doc&&!hasDocs) out.push({role:"ai",note:true,content:"No uploaded document contains this concept, so this explanation uses general knowledge."});
@@ -137,7 +137,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
         const {passages}=await retrieve(subject,c,{k:5,maxChars:6000});
         if(passages.length){
           const docReply=await callClaude(
-            "You are an AI tutor. Explain using ONLY the lecture passages provided. After each point, cite the passage it came from, like [S1]. Do not add outside information. If the passages do not explain the concept, say so. "+LECTURE_GUARD,
+            "You are an AI tutor. Explain using ONLY what the lecture passages say. You may use simpler words, but do not add any fact, example, comparison, number or claim that the passages do not state, and do not make anything sound stronger than the passages do. After each sentence, cite the passage it came from, like [S1]. If the passages do not explain the concept, say so. "+LECTURE_GUARD,
             `Concept: "${c.name}" — ${c.definition}
 
 Lecture passages:
@@ -146,8 +146,12 @@ ${passagesForPrompt(passages)}
 Explain what the lecture says about "${c.name}".`,
             1500
           );
-          docPassages=passages; docMsgId=`doc_${Date.now()}`;
-          out.push({role:"doc",id:docMsgId,content:docReply,docName:docNames.join(", "),sources:citedSources(passages,docReply)});
+          // TA point 19: every sentence is checked BEFORE the learner sees it; only lecture-supported sentences are shown
+          docMsgId=`doc_${Date.now()}`;
+          docCheck={passages,raw:docReply,docName:docNames.join(", "),
+            promise:filterToLecture(callClaude,docReply,passages).then(f=>({f}),e=>({error:e.message}))};
+          out.push({role:"loading-check",id:docMsgId,content:""});
+          setMessages([...out]);
         } else {
           out.push({role:"doc",content:`No passage in your lecture matches "${c.name}".`,docName:docNames.join(", "),sources:[]});
         }
@@ -165,6 +169,18 @@ Give a clear explanation with a practical real-world example.`,
         );
         out.push({role:"kb",content:kbReply});
       }
+      if(docCheck){
+        setMessages([...out]);
+        const r=await docCheck.promise;
+        const base={role:"doc",id:docMsgId,docName:docCheck.docName};
+        let msg;
+        if(r.error) msg={...base,content:docCheck.raw,sources:citedSources(docCheck.passages,docCheck.raw),check:{status:"failed",strict:true,error:r.error}};
+        else if(!r.f) msg={...base,content:docCheck.raw,sources:citedSources(docCheck.passages,docCheck.raw)};
+        else if(!r.f.kept) msg={...base,content:`Your lecture pages do not say enough about "${c.name}" to explain it. Tick 🧠 From Knowledge Base for a general explanation.`,sources:[],check:{status:"done",filtered:r.f}};
+        else msg={...base,content:r.f.text,sources:citedSources(docCheck.passages,r.f.text),check:{status:"done",filtered:r.f}};
+        out[out.findIndex(x=>x.id===docMsgId)]=msg;
+        if(r.f) commit(logFaith(subjRef.current,groundingEntry(cId,"explanation",r.f))); // left-out sentences go to the Faithfulness CSV only
+      }
       setMessages([{role:"loading-personal",content:""},...out]);
       const note=await notePromise;
       const personal=[];
@@ -172,7 +188,6 @@ Give a clear explanation with a practical real-world example.`,
       if(note?.forYou?.length) personal.push({role:"foryou",items:note.forYou,covers:note.covers,sources:note.forYouSources});
       if(note?.error) personal.push({role:"ai",note:true,content:`(Could not personalise this explanation: ${note.error})`});
       setMessages([...personal,...out]);
-      if(docMsgId) runCheck(docMsgId,out.find(x=>x.id===docMsgId).content,docPassages,"explanation"); // point 19
     }catch(e){setMessages([{role:"ai",content:"Error: "+e.message}]);}
     setLoading(false);
   };
@@ -519,6 +534,9 @@ Give a clear explanation with a practical real-world example.`,
             // Loading states
             if(m.role==="loading-doc") return (
               <div key={i} className="loading fade"><div className="spin"/><span>Reading your document...</span></div>
+            );
+            if(m.role==="loading-check") return (
+              <div key={i} className="loading fade"><div className="spin"/><span>🔎 Checking against your lecture…</span></div>
             );
             if(m.role==="loading-kb") return (
               <div key={i} className="loading fade"><div className="spin"/><span>Generating knowledge base answer...</span></div>

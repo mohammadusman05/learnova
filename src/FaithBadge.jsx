@@ -10,7 +10,16 @@ export const FaithBadge = ({ check }) => {
     <div className="faith-badge" style={{ marginTop: 10, fontSize: 12, fontFamily: "var(--mono)", color, whiteSpace: "normal" }}>{children}</div>
   );
   if (check.status === "working") return wrap("🔎 Checking against your lecture…");
+  if (check.status === "failed" && check.strict) return wrap(`⚠ Could not check against your lecture, so some sentences may not come from it (${check.error})`, "#b45309");
   if (check.status === "failed") return wrap(`🔎 Lecture check unavailable (${check.error})`);
+  // "From My Document" explanation: sentences not in the lecture were left out — only the count is shown, never the content
+  if (check.filtered) {
+    const f = check.filtered;
+    return wrap(<>
+      <span style={{ color: "#15803d", fontWeight: 700 }}>{f.removed ? "🔎 Lecture check: ✓ only sentences from your lecture are shown" : "🔎 Lecture check: ✓ every sentence is from your lecture"}</span>
+      {f.removed > 0 && <span className="faith-left-out"> · {f.removed} sentence{f.removed !== 1 ? "s" : ""} left out (not in your lecture)</span>}
+    </>);
+  }
   const g = check.result;
   if (!g) return null;
   if (!g.checked) return wrap(`🔎 Lecture check: nothing to check against the lecture${g.beyond ? ` (${g.beyond} statement${g.beyond !== 1 ? "s" : ""} beyond your lecture)` : ""}`);

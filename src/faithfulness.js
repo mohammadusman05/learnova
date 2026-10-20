@@ -19,7 +19,7 @@ export const tutorAnswerSystem = (subjectName, conceptName) =>
 // ── 1. groundedness of an answer ──
 export const JUDGE_PROMPT = `You are a strict fact-checker for an AI tutor. You get the tutor's ANSWER and the numbered LECTURE PASSAGES it was given.
 Split the answer into its factual statements (skip greetings, questions and filler). For each statement decide:
-- "supported": the passage(s) it cites — or, if it cites none, any passage — clearly state it
+- "supported": the passage(s) it cites — or, if it cites none, any passage — clearly state it. Rewording, simpler words, or something the passages plainly imply also count as supported (judge the meaning, not the exact words)
 - "not supported": the passages do not state it, or it cites a passage that does not say it
 - "beyond": it comes after a line starting "Beyond your lecture:" (general knowledge, clearly labelled — not checked against the lecture)
 Return ONLY valid JSON, nothing else:
@@ -51,6 +51,95 @@ export const checkGrounding = async (callClaude, answer, passages) => {
     last = oneLine(raw || "(no reply)", 120);
   }
   throw new Error(`the judge did not return a valid list (replied: "${last}…")`);
+};
+
+// ── 1b. "From My Document" explanations: the learner sees ONLY sentences the lecture supports ──
+// The explanation is split into sentences, each is checked, and the ones the lecture does not support are
+// left out before the learner sees anything. They are kept only in the Faithfulness CSV (for the report).
+export const SENTENCE_CHECK_PROMPT = `You check an AI tutor's explanation against the LECTURE PASSAGES it was given. The learner must see ONLY what the lecture says.
+For each numbered SENTENCE decide:
+- "in": the passages state it. Rewording, simpler words, a short summary, or something the passages plainly imply all count as "in" — judge the meaning, not the exact words. A sentence that only introduces, links or sums up without adding a new fact is "in". A sentence saying the lecture does not cover something is "in".
+- "out": it adds any fact, example, comparison, number, purpose or claim that the passages do not state, or it says something more strongly than the passages do (for example "any", "always", "specifically designed for").
+A citation like [S1] does not make a sentence "in" by itself.
+Return ONLY valid JSON, nothing else:
+{"sentences":[{"n":1,"verdict":"in"},{"n":2,"verdict":"out","note":"one short line: what the passages do not say"}]}
+Include every sentence number exactly once.
+${LECTURE_GUARD}`;
+
+const HEADING = /^\s*(#{1,6})\s/;
+const STRUCTURE = /^\s*(#{1,6}\s|\*\*[^*]+\*\*:?\s*$|[-*_]{3,}\s*$)/;   // headings, bold-only lines, rules: kept, not checked
+const LINE_PREFIX = /^(\s*(?:[-*•]|\d+[.)])\s+)/;                         // bullet / number in front of a line
+const ABBREV = /\b(e\.g|i\.e|vs|etc|Fig|Eq|No|cf)\./g;
+
+/** explanation → {units:[{n,text}] (the sentences to check), layout (to rebuild the text)} */
+export const splitForCheck = (text) => {
+  const units = [];
+  const layout = String(text || "").replace(/\r/g, "").split("\n").map(line => {
+    if (!line.trim()) return { blank: true };
+    if (STRUCTURE.test(line)) return { heading: line, level: (line.match(HEADING)?.[1].length) || 7 };
+    const m = line.match(LINE_PREFIX); const prefix = m ? m[1] : "";
+    const body = line.slice(prefix.length).replace(ABBREV, "$1․");
+    const sents = [];
+    for (const part of body.split(/(?<=[.!?]["”')\]]?)\s+(?=["“(\[*]?[A-Z0-9])/)) {
+      const lead = part.match(/^((?:\[S\d+\][,;]?\s*)+)([\s\S]*)$/);   // "[S1] Next sentence" → the citation belongs to the sentence before
+      if (lead && sents.length) { sents[sents.length - 1] += " " + lead[1].trim(); if (lead[2].trim()) sents.push(lead[2].trim()); }
+      else if (part.trim()) sents.push(part.trim());
+    }
+    return { prefix, ids: sents.map(s => { units.push({ n: units.length + 1, text: s.replace(/․/g, ".") }); return units.length; }) };
+  });
+  return { units, layout };
+};
+
+/** rebuild the explanation with only the kept sentences; headings with nothing left under them go too */
+export const rebuildKept = (layout, units, keep) => {
+  let lines = [];
+  for (const L of layout) {
+    if (L.blank) lines.push({ blank: true });
+    else if (L.heading !== undefined) lines.push(L);
+    else { const kept = L.ids.filter(id => keep.has(id)).map(id => units[id - 1].text); if (kept.length) lines.push({ text: L.prefix + kept.join(" ") }); }
+  }
+  lines = lines.filter((L, i) => {
+    if (L.heading === undefined) return true;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].blank) continue;
+      if (lines[j].heading !== undefined) { if (lines[j].level <= L.level) return false; continue; }
+      return true;
+    }
+    return false;
+  });
+  const out = [];
+  for (const L of lines) {
+    if (L.blank) { if (out.length && out[out.length - 1] !== "") out.push(""); }
+    else out.push(L.heading ?? L.text);
+  }
+  while (out.length && out[out.length - 1] === "") out.pop();
+  return out.join("\n");
+};
+
+/** → {text (only lecture-supported sentences), kept, removed, checked, supported, notSupported, beyond, score, statements} — null if nothing to check */
+export const filterToLecture = async (callClaude, answer, passages) => {
+  const { units, layout } = splitForCheck(answer);
+  if (!passages?.length || !units.length) return null;
+  const usr = `LECTURE PASSAGES:\n${passagesBlock(passages)}\n\nSENTENCES:\n${units.map(u => `${u.n}. ${u.text}`).join("\n")}`;
+  let last = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await callClaude(SENTENCE_CHECK_PROMPT, usr + (attempt ? "\n\nReply with the JSON only." : ""), 3000, 0);
+    const p = exJSON(raw || "");
+    const v = {};
+    if (p && Array.isArray(p.sentences)) p.sentences.forEach(s => {
+      const n = Number(s?.n);
+      if (Number.isInteger(n) && n >= 1 && n <= units.length) v[n] = { verdict: s?.verdict === "in" ? "in" : "out", note: oneLine(s?.note, 200) };
+    });
+    if (Object.keys(v).length >= Math.ceil(units.length / 2)) {
+      const keep = new Set(units.filter(u => v[u.n]?.verdict === "in").map(u => u.n));   // a sentence the checker skipped is left out
+      const statements = units.map(u => ({ text: u.text, cites: (u.text.match(/S\d+/g) || []), verdict: keep.has(u.n) ? "supported" : "not supported", note: v[u.n] ? v[u.n].note : "not checked" }));
+      const removed = units.length - keep.size;
+      return { text: rebuildKept(layout, units, keep), kept: keep.size, removed, checked: units.length,
+        supported: keep.size, notSupported: removed, beyond: 0, score: Math.round(100 * keep.size / units.length), statements };
+    }
+    last = oneLine(raw || "(no reply)", 120);
+  }
+  throw new Error(`the checker did not return a valid list (replied: "${last}…")`);
 };
 
 // ── 2. quiz answer keys ──
