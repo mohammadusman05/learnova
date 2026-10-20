@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, exJSON, graphEngine, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
+import { getMemory, noteStudied, addChatMessages, analyseMistakes, applyMistakes } from './learnerMemory.js';
+import { MemoryBox, EarlierChat, NotedLine } from './MemoryBox.jsx';
 
 // TA point 11: list the lecture passages a reply actually cited, e.g. "[S1] L01.pdf, p.6"
 const citedSources = (passages, reply) => sourcesOf(passages).filter(s => (reply || "").includes(`[${s.tag}]`));
@@ -32,13 +34,17 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const [quizSource,setQuizSource]=useState("lecture");      // point 11: where quiz questions come from
   const [quizSetup,setQuizSetup]=useState(false);
   const [quizUsedSource,setQuizUsedSource]=useState("general");
+  const [sessionStart,setSessionStart]=useState(Date.now()); // point 14: chat saved before this visit = "earlier conversation"
+  const [noted,setNoted]=useState(null);                     // point 14: mistakes noted after a quiz
+  const subjRef=useRef(subject); subjRef.current=subject;    // newest subject, for saves that finish after a Claude call
+  const commit=(updated)=>{ subjRef.current=updated; onUpdate(updated); };
   const bottomRef=useRef();
   const msgContainerRef=useRef();
   const ready=graphEngine.getReadyConcepts(graph,mastery);
   const all=Object.values(graph.nodes);
 
-  const callClaude=async(sys,usr,mt=1500)=>{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:mt,system:sys,messages:[{role:"user",content:usr}]})});
+  const callClaude=async(sys,usr,mt=1500,temperature)=>{
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:mt,system:sys,messages:[{role:"user",content:usr}],...(temperature!==undefined?{temperature}:{})})});
     const d=await res.json();return d.content?.[0]?.text||"";
   };
 
@@ -88,6 +94,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const startLearning=async(id)=>{
     const c=graph.nodes[id];if(!c) return;
     setCId(id);setPhase("explain");setMessages([]);setLoading(false);
+    setSessionStart(Date.now());setNoted(null);
     setDocCollapsed(false);setKbCollapsed(false);
     setSourcesReady(false);
     const prevPct=(subject.readProgress||{})[id]||0;
@@ -101,6 +108,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const generateExplanation=async()=>{
     const c=graph.nodes[cId];if(!c) return;
     setMessages([]);setLoading(true);setSourcesReady(true);
+    commit(noteStudied(subjRef.current,cId)); // point 14: remember each study visit
     try{
       // TA point 11: each choice works on its own — Document only / Knowledge base only / Both
       const docNames=(subject.docs||[]).filter(d=>conceptDocIds(c).includes(d.id)).map(d=>d.name);
@@ -164,13 +172,31 @@ Give a clear explanation with a practical real-world example.`,
           : `No lecture passages match this question.\n\nLearner's question: ${userMsg}`,
         1000
       );
-      setMessages(m=>[...m,{role:"ai",content:reply,sources:citedSources(passages,reply)}]);
-    }catch(e){setMessages(m=>[...m,{role:"ai",content:"Error: "+e.message}]);}
+      const sources=citedSources(passages,reply);
+      setMessages(m=>[...m,{role:"ai",content:reply,sources}]);
+      commit(addChatMessages(subjRef.current,cId,[{role:"user",content:userMsg},{role:"ai",content:reply,sources}])); // point 14: chat is remembered
+    }catch(e){
+      setMessages(m=>[...m,{role:"ai",content:"Error: "+e.message}]);
+      commit(addChatMessages(subjRef.current,cId,[{role:"user",content:userMsg}])); // the question is still remembered
+    }
     setLoading(false);
   };
 
   // TA point 11: the learner chooses where quiz questions come from, then the quiz is generated
-  const startQuiz=()=>{ setPhase("quiz"); setQuiz(null); setQuizSetup(true); };
+  const startQuiz=()=>{ setPhase("quiz"); setQuiz(null); setQuizSetup(true); setNoted(null); };
+
+  // TA point 14: after a quiz, name the wrong idea behind each wrong answer (runs after the score is shown)
+  const noteMistakes=async(wrong,at)=>{
+    if(!wrong.length){ setNoted(null); return; }
+    setNoted({status:"working"});
+    try{
+      const known=getMemory(subjRef.current,cId).mistakes;
+      const analysed=await analyseMistakes(callClaude,graph.nodes[cId],wrong,known);
+      const r=applyMistakes(subjRef.current,cId,wrong,analysed,at);
+      commit(r.subject);
+      setNoted({status:"done",items:r.noted});
+    }catch(e){ setNoted({status:"failed",error:e.message}); }
+  };
   const generateQuiz=async()=>{
     setQuizSetup(false); setLoading(true); setQuiz(null);
     const c=graph.nodes[cId];
@@ -203,11 +229,13 @@ Give a clear explanation with a practical real-world example.`,
       const old=subject.mastery[cId]||0;
       const {mastery:nw, steps}=applyAnswers(old, quiz.map((q,i)=>({correct:sel[i]===q.correct, type:"mcq"})));
       const at=Date.now();
-      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, correct:s.correct, type:"mcq", screen:"study", questionSource:quizUsedSource, at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
+      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, picked:quiz[i].options?.[sel[i]], correct:s.correct, type:"mcq", screen:"study", questionSource:quizUsedSource, at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
       const newMastery={...subject.mastery,[cId]:nw};
       const newGraph={...subject.graph,nodes:{...subject.graph.nodes,[cId]:{...subject.graph.nodes[cId],state:nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
-      onUpdate({...subject,mastery:newMastery,graph:newGraph,answerLog:[...(subject.answerLog||[]),...log]});
+      commit({...subjRef.current,mastery:newMastery,graph:newGraph,answerLog:[...(subjRef.current.answerLog||[]),...log]});
       setTimeout(()=>setPhase("result"),900);
+      // point 14: wrong answers → mistakes to remember
+      noteMistakes(quiz.map((q,i)=>({q,i})).filter(({q,i})=>sel[i]!==q.correct).map(({q,i})=>({question:q.q, answer:q.options?.[sel[i]]||"", correct:q.options?.[q.correct]||"", explanation:q.explanation, screen:"study"})), at);
     };
     return (
       <div className="fade">
@@ -317,6 +345,9 @@ Give a clear explanation with a practical real-world example.`,
       </div>
       {phase==="explain"&&(
         <div style={{maxWidth:"100%"}}>
+          {/* TA point 14: what Learnova remembers about this learner on this concept */}
+          <MemoryBox subject={subject} cId={cId} onChange={commit}/>
+          <EarlierChat subject={subject} cId={cId} since={sessionStart} onChange={commit}/>
           {/* Source selector — shown before generating */}
           {!sourcesReady&&(
             <div className="card mb20" style={{background:"linear-gradient(135deg,#fff9f8,#f8fafc)"}}>
@@ -486,6 +517,8 @@ Give a clear explanation with a practical real-world example.`,
           <div className="score-big">{score}%</div>
           <div style={{fontSize:20,fontWeight:800,marginBottom:8,marginTop:12,color:"var(--t1)"}}>{score>=80?"Excellent work! 🎉":score>=60?"Good effort! 📚":"Keep practising! 💪"}</div>
           <div className="ts t3 mb24 tm">Updated mastery: <span style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{subject.mastery[cId]||0}%</span>{" · "}{(subject.mastery[cId]||0)>=MASTERY_THRESHOLD?"Concept Mastered ✓":"Needs more practice"}</div>
+          <NotedLine noted={noted}/>
+          <div className="mb24"/>
           <div className="f g12 jc">
             <button className="btn btn-secondary" onClick={()=>setPhase("explain")}>Review Lesson</button>
             <button className="btn btn-primary" onClick={startQuiz}>Retake Quiz</button>

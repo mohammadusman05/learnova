@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, exJSON, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt } from './retrieval.js';
+import { getMemory, analyseMistakes, applyMistakes } from './learnerMemory.js';
+import { NotedLine } from './MemoryBox.jsx';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
   return (
@@ -81,17 +83,20 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
+  const [noted, setNoted] = useState(null);                       // point 14: mistakes noted after an evaluation
+  const subjRef = useRef(subject); subjRef.current = subject;     // newest subject, for saves that finish after a Claude call
+  const commit = (updated) => { subjRef.current = updated; onUpdate(updated); };
 
   // ...
   useEffect(()=>{
     if(initialConceptId){ setSelectedConcept(initialConceptId); setPhase("config"); }
   },[initialConceptId]);
 
-  const callClaude = async (sys, usr, mt=3000) => {
+  const callClaude = async (sys, usr, mt=3000, temperature) => {
     const res = await fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:mt,system:sys,messages:[{role:"user",content:usr}]})
+      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:mt,system:sys,messages:[{role:"user",content:usr}],...(temperature!==undefined?{temperature}:{})})
     });
     const d = await res.json(); return d.content?.[0]?.text || "";
   };
@@ -243,23 +248,36 @@ ${JSON.stringify(gradingInput)}`
     const old = subject.mastery[selectedConcept] || 0;
     const { mastery: nw, steps } = applyAnswers(old, graded.map(r => ({ correct: !!r.isCorrect, type: r.type === "desc" ? "desc" : "mcq" })));
     const at = Date.now();
-    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, correct: s.correct, type: s.type, screen: "evaluation", questionSource: usedSource, at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
+    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, picked: graded[i].userAnswer, correct: s.correct, type: s.type, screen: "evaluation", questionSource: usedSource, at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
     const newMastery = {...subject.mastery, [selectedConcept]: nw};
     const newGraph = {...subject.graph, nodes:{...subject.graph.nodes,[selectedConcept]:{...subject.graph.nodes[selectedConcept],state: nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
 
-    onUpdate({...subject, mastery:newMastery, graph:newGraph, evalHistory:{...existing,[selectedConcept]:newHistory}, answerLog:[...(subject.answerLog||[]), ...log]});
+    commit({...subject, mastery:newMastery, graph:newGraph, evalHistory:{...existing,[selectedConcept]:newHistory}, answerLog:[...(subject.answerLog||[]), ...log]});
     setResults({...attempt});
     setPhase("results");
     setLoading(false);
+
+    // TA point 14: wrong answers → mistakes to remember (after the results are shown)
+    const wrong = graded.filter(r => !r.isCorrect && r.userAnswer && r.userAnswer !== "Not answered")
+      .map(r => ({ question: r.q, answer: r.userAnswer, correct: r.correctAnswer || "", explanation: r.feedback || "", screen: "evaluation" }));
+    if (!wrong.length) { setNoted(null); return; }
+    setNoted({ status: "working" });
+    try {
+      const cIdNow = selectedConcept;
+      const analysed = await analyseMistakes(callClaude, c, wrong, getMemory(subjRef.current, cIdNow).mistakes);
+      const r = applyMistakes(subjRef.current, cIdNow, wrong, analysed, at);
+      commit(r.subject);
+      setNoted({ status: "done", items: r.noted });
+    } catch (e) { setNoted({ status: "failed", error: e.message }); }
   };
 
   const resetToSelect = () => {
-    setPhase("select"); setSelectedConcept(null); setQuestions([]); setAnswers({}); setResults(null);
+    setPhase("select"); setSelectedConcept(null); setQuestions([]); setAnswers({}); setResults(null); setNoted(null);
     if(onClearConcept) onClearConcept();
   };
 
   const goRetake = () => {
-    setPhase("config"); setQuestions([]); setAnswers({}); setResults(null);
+    setPhase("config"); setQuestions([]); setAnswers({}); setResults(null); setNoted(null);
   };
 
   // ────────────────────────────────────────────
@@ -535,6 +553,7 @@ ${JSON.stringify(gradingInput)}`
             ? <div style={{fontSize:13,color:"#16a34a",fontFamily:"var(--mono)"}}>Concept marked as Mastered! Great work 🎉</div>
             : <div style={{fontSize:13,color:"#dc2626",fontFamily:"var(--mono)"}}>Score 75% or above to pass. Review the topic and retake.</div>
           }
+          <NotedLine noted={noted}/>
         </div>
 
         {/* Action buttons */}
