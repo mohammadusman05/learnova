@@ -8,6 +8,7 @@
 // With personalisation off, or with nothing remembered yet, everything works exactly as before.
 // ============================================================
 import { exJSON } from './utils.js';
+import { LECTURE_GUARD } from './privacy.js';
 import { getMemory, openMistakes, memorySummary } from './learnerMemory.js';
 import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 
@@ -26,7 +27,8 @@ Write:
 - "covers": the open mistakes (exact wording) your bullets address.
 SOURCE RULE: if lecture passages are given, take facts only from them and cite like [S1]; anything not in the passages must start with "Beyond your lecture:". If no passages are given, use general knowledge.
 Return ONLY valid JSON, nothing else:
-{"recap":[{"concept":"Embeddings","text":"..."}],"forYou":["...","..."],"covers":["thinks ..."]}`;
+{"recap":[{"concept":"Embeddings","text":"..."}],"forYou":["...","..."],"covers":["thinks ..."]}
+${LECTURE_GUARD}`;
 
 /** Returns null when there is nothing personal to say (switch off, or nothing remembered yet).
  *  Otherwise {recap:[{name, mastery, text}], forYou:[...], covers:[...], recapSources, forYouSources} */

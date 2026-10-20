@@ -6,6 +6,7 @@ import { getMemory, analyseAnswers, applyAnalysis, autoGroup, remapNoted } from 
 import { NotedLine, PersonalisationSwitch, TargetTag } from './MemoryBox.jsx';
 import { isPersonalised, targetBlock, resolveTargets } from './personalise.js';
 import { scheduleAfterQuiz } from './revision.js';
+import { LECTURE_GUARD } from './privacy.js';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
   return (
@@ -135,7 +136,8 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
       const n = config.mcqCount;
       const raw = await callClaude(
         `Generate exactly ${n} multiple choice questions. Return ONLY valid JSON:
-{"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why A is correct"}]}`,
+{"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why A is correct"}]}
+${LECTURE_GUARD}`,
         `Generate ${n} ${diffStr} MCQ questions about: "${c.name}" — ${c.definition}
 Subject: ${subject.name}
 Difficulty: ${config.difficulty}${lectureBlock}${tb.text}`
@@ -151,7 +153,8 @@ Difficulty: ${config.difficulty}${lectureBlock}${tb.text}`
       const n = config.descCount;
       const raw = await callClaude(
         `Generate exactly ${n} descriptive/short-answer questions. Return ONLY valid JSON:
-{"questions":[{"q":"Question requiring a written explanation?","sampleAnswer":"A thorough sample answer","keyPoints":["key point 1","key point 2"]}]}`,
+{"questions":[{"q":"Question requiring a written explanation?","sampleAnswer":"A thorough sample answer","keyPoints":["key point 1","key point 2"]}]}
+${LECTURE_GUARD}`,
         `Generate ${n} ${diffStr} descriptive questions about: "${c.name}" — ${c.definition}
 Subject: ${subject.name}
 Difficulty: ${config.difficulty}${lectureBlock}${wantMcq ? "" : tb.text}`

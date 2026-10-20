@@ -5,6 +5,7 @@ import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck, autoGroup, remapNoted, groupMistakes, applyGrouping } from './learnerMemory.js';
 import { MemoryBox, EarlierChat, NotedLine, ChatNoted, PersonalisationSwitch, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
+import { LECTURE_GUARD } from './privacy.js';
 import { scheduleAfterQuiz, dueList, nextRevisionLabel, revisionTargets, getSchedule } from './revision.js';
 
 // TA point 11: list the lecture passages a reply actually cited, e.g. "[S1] L01.pdf, p.6"
@@ -132,7 +133,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
         const {passages}=await retrieve(subject,c,{k:5,maxChars:6000});
         if(passages.length){
           const docReply=await callClaude(
-            "You are an AI tutor. Explain using ONLY the lecture passages provided. After each point, cite the passage it came from, like [S1]. Do not add outside information. If the passages do not explain the concept, say so.",
+            "You are an AI tutor. Explain using ONLY the lecture passages provided. After each point, cite the passage it came from, like [S1]. Do not add outside information. If the passages do not explain the concept, say so. "+LECTURE_GUARD,
             `Concept: "${c.name}" — ${c.definition}
 
 Lecture passages:
@@ -184,7 +185,7 @@ Give a clear explanation with a practical real-world example.`,
       const ctx=chatContext(subjRef.current,cId,messages);
       const head=(ctx.known?`What you know about this learner:\n${ctx.known}\n\n`:"")+(ctx.convo?`Conversation so far:\n${ctx.convo}\n\n`:"");
       const reply=await callClaude(
-        `You are an AI tutor for "${subject.name}", helping a learner with "${c?.name}". Answer from the lecture passages first and cite them like [S1]. If the passages do not cover the question (or part of it), you may answer from general knowledge, but put that part after a line that starts with "Beyond your lecture:". Be clear and concise.`+CHAT_PERSONAL_RULE,
+        `You are an AI tutor for "${subject.name}", helping a learner with "${c?.name}". Answer from the lecture passages first and cite them like [S1]. If the passages do not cover the question (or part of it), you may answer from general knowledge, but put that part after a line that starts with "Beyond your lecture:". Be clear and concise.`+CHAT_PERSONAL_RULE+" "+LECTURE_GUARD,
         head+(passages.length
           ? `Lecture passages:\n${passagesForPrompt(passages)}\n\nLearner's question: ${userMsg}`
           : `No lecture passages match this question.\n\nLearner's question: ${userMsg}`),
@@ -256,7 +257,7 @@ Give a clear explanation with a practical real-world example.`,
     // TA point 16: up to 2 of the 3 questions aim at the learner's open mistakes (when personalisation is on)
     const tb=revision?revisionTargets(subjRef.current,id):targetBlock(subjRef.current,id,2,"mcq"); // point 17: revision aims at weak spots
     const raw=await callClaude(
-      `Generate 3 MCQ questions. Return ONLY JSON:\n{"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why correct"}]}`,
+      `Generate 3 MCQ questions. Return ONLY JSON:\n{"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why correct"}]}\n${LECTURE_GUARD}`,
       (source==="lecture"
         ? `Create 3 ${revision?"revision ":""}quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name}).\nEvery question must be about "${c?.name}" and answerable from these lecture passages only. Ignore any passage that is not about "${c?.name}".\n\n${lecture}`
         : `Create 3 ${revision?"revision ":""}quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name})`)+tb.text

@@ -1,3 +1,4 @@
+import { LECTURE_GUARD } from './privacy.js';
 // ============================================================
 // CONCEPT EXTRACTION HELPERS  (TA feedback point 6: concept granularity)
 // Pure functions + prompts used by UploadScreen. No API calls here.
@@ -23,7 +24,8 @@ Rules:
 - Extract every concept in this part that fits the definition. There is no fixed number; if this part teaches no concept, return an empty list.
 - Use the name a lecturer would use. The definition is one clear sentence based on the text.
 - Return ONLY valid JSON, nothing else:
-{"topic":"Overall topic of this part","concepts":[{"name":"Name","definition":"One clear sentence","importance":0.8,"difficulty":0.5}]}`;
+{"topic":"Overall topic of this part","concepts":[{"name":"Name","definition":"One clear sentence","importance":0.8,"difficulty":0.5}]}
+${LECTURE_GUARD}`;
 
 // Part 5 — decide which concepts are the same idea
 export const MERGE_PROMPT = `You decide which concepts are the SAME idea.

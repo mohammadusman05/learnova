@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { graphEngine, exJSON } from './utils.js';
 import { EXTRACT_PROMPT, MERGE_PROMPT, stripRepeatedLines, splitIntoPartsWithOffsets, combineConcepts, planMerge, conceptDocIds, joinPagesWithMarkers, removePageMarkers } from './conceptExtraction.js';
 import { linkNewDocument } from './prereqLinks.js';
+import { LECTURE_GUARD } from './privacy.js';
 import { extractPdfText, looksScanned } from './pdfText.js';
 const UploadScreen = ({ subject, onUpdate, apiKey }) => {
   const [drag,setDrag]=useState(false);
@@ -89,7 +90,7 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
               temperature:0,
               messages:[{role:"user",content:[
                 {type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}},
-                {type:"text",text:"Extract all the text content from this PDF document. Return only the raw text, preserving paragraph structure."}
+                {type:"text",text:"Extract all the text content from this PDF document. Return only the raw text, preserving paragraph structure. "+LECTURE_GUARD}
               ]}]
             })
           });

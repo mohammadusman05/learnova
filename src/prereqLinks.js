@@ -10,6 +10,7 @@
 import { graphEngine, exJSON } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { pageAt, tokenize } from './retrieval.js';
+import { LECTURE_GUARD, currentLearnerCode } from './privacy.js';
 
 // ── prompts ──
 // Links among one document's concepts (runs after parts are combined,
@@ -43,7 +44,8 @@ Use the lecture evidence when it is given (where B's lecture mentions A). Missin
 Give a confidence ("high", "medium" or "low") and a one-line reason.
 Return ONLY valid JSON, nothing else:
 {"checks":[{"id":"k1","verdict":"keep","confidence":"high","reason":"..."}]}
-Include every link id exactly once.`;
+Include every link id exactly once.
+${LECTURE_GUARD}`;
 
 const MAX_EARLIER = 250;   // earlier concepts shown to Claude at once (most related first)
 const CHECK_BATCH = 30;    // links per checker call
@@ -347,9 +349,9 @@ export const addLink = (graph, docs, s, t, reason = "") => {
 };
 
 // ── links CSV (for measuring link accuracy — TA point 13) ──
-const LINK_COLUMNS = ["subject", "prerequisite", "concept", "status", "origin", "reason", "checker_note", "confidence", "checked_by", "person_verdict", "evidence", "evidence_text", "prerequisite_pdfs", "concept_pdfs"];
+const LINK_COLUMNS = ["subject", "prerequisite", "concept", "status", "origin", "reason", "checker_note", "confidence", "checked_by", "person_verdict", "evidence", "evidence_text", "prerequisite_pdfs", "concept_pdfs", "learner_code"]; // learner_code: point 18
 const csvCell = (v) => { const s = v === undefined || v === null ? "" : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-export const linksCsv = (subject) => {
+export const linksCsv = (subject, learnerCode = currentLearnerCode()) => {
   const nodes = subject.graph?.nodes || {};
   const docName = Object.fromEntries((subject.docs || []).map(d => [d.id, d.name]));
   const pdfs = (id) => conceptDocIds(nodes[id] || {}).map(d => docName[d] || d).join("; ");
@@ -358,7 +360,7 @@ export const linksCsv = (subject) => {
     subject.name, nodes[e.source]?.name || e.source, nodes[e.target]?.name || e.target, status,
     e.personVerdict === "added" ? "added by a person" : (ORIGIN[e.origin] || ""),
     e.reason, e.checkNote, e.confidence || "", e.checkedBy || (status === "active" ? "none" : ""), e.personVerdict || "",
-    evidenceLabel(e.evidence), e.evidence?.snippet || "", pdfs(e.source), pdfs(e.target),
+    evidenceLabel(e.evidence), e.evidence?.snippet || "", pdfs(e.source), pdfs(e.target), learnerCode,
   ];
   const active = (subject.graph?.edges || []).filter(e => e.type === "prerequisite").map(e => row(e, "active"));
   const removed = (subject.graph?.removedLinks || []).map(r => row(r, r.removedBy === "person" ? "removed by person" : "dropped by checker"));

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-const KeyGate = ({ onUnlock, logo }) => {
+const KeyGate = ({ onUnlock, logo, notice }) => {
   const [key,setKey]=useState("");
   const [show,setShow]=useState(false);
   const [loading,setLoading]=useState(false);
@@ -30,6 +30,7 @@ const KeyGate = ({ onUnlock, logo }) => {
         <div style={{background:"#fff",border:"1px solid #e2e8f0",borderRadius:20,padding:36,boxShadow:"0 20px 60px rgba(0,0,0,0.1)"}}>
           <div style={{fontSize:17,fontWeight:700,marginBottom:6,color:"#0f172a"}}>Welcome 👋</div>
           <div style={{fontSize:13,color:"#64748b",fontFamily:"var(--mono)",marginBottom:24,lineHeight:1.7}}>Enter your Anthropic API key to unlock all AI features. Stays in your browser only — never saved, never shared.</div>
+          {notice&&<div className="lock-notice" style={{fontSize:12,color:"#b45309",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,padding:"8px 12px",marginBottom:16}}>🔒 {notice}</div>}
           <div style={{marginBottom:16,position:"relative",overflow:"hidden",borderRadius:12}}>
             <input type={show?"text":"password"} placeholder="Enter your Anthropic API key..."
               value={key} onChange={e=>setKey(e.target.value)} onKeyDown={e=>e.key==="Enter"&&verify()}
