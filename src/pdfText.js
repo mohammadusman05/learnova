@@ -37,5 +37,5 @@ export const extractPdfText = async (arrayBuffer) => {
     page.cleanup();
   }
   await pdf.destroy();
-  return { text: pages.join("\n\n"), numPages };
+  return { text: pages.join("\n\n"), numPages, pages }; // pages: text of each page, for page citations (point 11)
 };

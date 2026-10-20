@@ -1,5 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ME, exJSON, graphEngine, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
+import { conceptDocIds } from './conceptExtraction.js';
+import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
+
+// TA point 11: list the lecture passages a reply actually cited, e.g. "[S1] L01.pdf, p.6"
+const citedSources = (passages, reply) => sourcesOf(passages).filter(s => (reply || "").includes(`[${s.tag}]`));
+const SourcesList = ({ sources, color = "#2563eb", border = "#bfdbfe" }) => (sources && sources.length ? (
+  <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px dashed ${border}`, whiteSpace: "normal" }}>
+    <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", letterSpacing: "1.5px", color, marginBottom: 6 }}>SOURCES</div>
+    {sources.map(s => (
+      <div key={s.tag} title={s.snippet} style={{ fontSize: 12, color: "var(--t2)", marginBottom: 3, lineHeight: 1.5 }}>
+        <b style={{ color }}>[{s.tag}]</b> {s.label}
+      </div>
+    ))}
+  </div>
+) : null);
 const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const {graph,mastery}=subject;
   const [cId,setCId]=useState(initialId||null);
@@ -14,6 +29,9 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const [kbCollapsed,setKbCollapsed]=useState(false);
   const [sourceChoice,setSourceChoice]=useState({doc:true,kb:true});
   const [sourcesReady,setSourcesReady]=useState(false);
+  const [quizSource,setQuizSource]=useState("lecture");      // point 11: where quiz questions come from
+  const [quizSetup,setQuizSetup]=useState(false);
+  const [quizUsedSource,setQuizUsedSource]=useState("general");
   const bottomRef=useRef();
   const msgContainerRef=useRef();
   const ready=graphEngine.getReadyConcepts(graph,mastery);
@@ -84,31 +102,36 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
     const c=graph.nodes[cId];if(!c) return;
     setMessages([]);setLoading(true);setSourcesReady(true);
     try{
-      const sourceDoc=(subject.docs||[]).find(d=>d.id===c.sourceDocId);
-      const hasDocText=sourceDoc&&sourceDoc.rawText&&sourceDoc.rawText.length>100;
-      if(hasDocText&&sourceChoice.doc&&sourceChoice.kb){
-        setMessages([{role:"loading-doc",content:""}]);
-        const docReply=await callClaude(
-          "You are an AI tutor. Answer ONLY based on the provided document text. Do not add outside information.",
-          `Based ONLY on this document text, explain "${c.name}":
+      // TA point 11: each choice works on its own — Document only / Knowledge base only / Both
+      const docNames=(subject.docs||[]).filter(d=>conceptDocIds(c).includes(d.id)).map(d=>d.name);
+      const hasDocs=docNames.length>0;
+      const wantDoc=sourceChoice.doc&&hasDocs;
+      const wantKb=sourceChoice.kb||!wantDoc;   // "Document only" but no document → general knowledge, with a note
+      const out=[];
+      if(sourceChoice.doc&&!hasDocs) out.push({role:"ai",content:"No uploaded document contains this concept, so this explanation uses general knowledge."});
+      if(wantDoc){
+        setMessages([...out,{role:"loading-doc",content:""}]);
+        // RAG: find the best passages for this concept in ALL its documents (not just the first 8,000 characters)
+        const {passages}=await retrieve(subject,c,{k:5,maxChars:6000});
+        if(passages.length){
+          const docReply=await callClaude(
+            "You are an AI tutor. Explain using ONLY the lecture passages provided. After each point, cite the passage it came from, like [S1]. Do not add outside information. If the passages do not explain the concept, say so.",
+            `Concept: "${c.name}" — ${c.definition}
 
-${sourceDoc.rawText.substring(0,8000)}
+Lecture passages:
+${passagesForPrompt(passages)}
 
-Explain what the document says about "${c.name}".`,
-          1500
-        );
-        setMessages([{role:"loading-doc",content:""},{role:"loading-kb",content:""}]);
+Explain what the lecture says about "${c.name}".`,
+            1500
+          );
+          out.push({role:"doc",content:docReply,docName:docNames.join(", "),sources:citedSources(passages,docReply)});
+        } else {
+          out.push({role:"doc",content:`No passage in your lecture matches "${c.name}".`,docName:docNames.join(", "),sources:[]});
+        }
+      }
+      if(wantKb){
+        setMessages([...out,{role:"loading-kb",content:""}]);
         const kbReply=await callClaude(
-          `You are an expert AI tutor for "${subject.name}". Explain concepts clearly with examples and analogies.`,
-          `Explain "${c.name}" (${c.definition}) with examples and real-world applications. Subject: ${subject.name}`,
-          1500
-        );
-        setMessages([
-          {role:"doc",content:docReply,docName:sourceDoc.name},
-          {role:"kb",content:kbReply}
-        ]);
-      } else {
-        const exp=await callClaude(
           `You are an expert AI tutor for "${subject.name}". Explain concepts clearly with examples and analogies. Use line breaks for readability.`,
           `Teach me: "${c.name}"
 Definition: ${c.definition}
@@ -117,8 +140,9 @@ Subject: ${subject.name}
 Give a clear explanation with a practical real-world example.`,
           2000
         );
-        setMessages([{role:"kb",content:exp}]);
+        out.push({role:"kb",content:kbReply});
       }
+      setMessages(out);
     }catch(e){setMessages([{role:"ai",content:"Error: "+e.message}]);}
     setLoading(false);
   };
@@ -131,24 +155,39 @@ Give a clear explanation with a practical real-world example.`,
     setLoading(true);
     try{
       const c=graph.nodes[cId];
+      // TA point 11: answer from the lecture first (RAG), cite pages, label anything beyond the lecture
+      const {passages}=c?await retrieve(subject,c,{question:userMsg,k:4,maxChars:4500}):{passages:[]};
       const reply=await callClaude(
-        `You are an AI tutor for "${subject.name}". Answer questions about "${c?.name}" clearly and concisely.`,
-        userMsg,
+        `You are an AI tutor for "${subject.name}", helping a learner with "${c?.name}". Answer from the lecture passages first and cite them like [S1]. If the passages do not cover the question (or part of it), you may answer from general knowledge, but put that part after a line that starts with "Beyond your lecture:". Be clear and concise.`,
+        passages.length
+          ? `Lecture passages:\n${passagesForPrompt(passages)}\n\nLearner's question: ${userMsg}`
+          : `No lecture passages match this question.\n\nLearner's question: ${userMsg}`,
         1000
       );
-      setMessages(m=>[...m,{role:"ai",content:reply}]);
+      setMessages(m=>[...m,{role:"ai",content:reply,sources:citedSources(passages,reply)}]);
     }catch(e){setMessages(m=>[...m,{role:"ai",content:"Error: "+e.message}]);}
     setLoading(false);
   };
 
-  const startQuiz=async()=>{
-    setPhase("quiz");setLoading(true);setQuiz(null);
+  // TA point 11: the learner chooses where quiz questions come from, then the quiz is generated
+  const startQuiz=()=>{ setPhase("quiz"); setQuiz(null); setQuizSetup(true); };
+  const generateQuiz=async()=>{
+    setQuizSetup(false); setLoading(true); setQuiz(null);
     const c=graph.nodes[cId];
+    const hasDocs=!!c&&(subject.docs||[]).some(d=>conceptDocIds(c).includes(d.id));
+    let source=quizSource==="lecture"&&hasDocs?"lecture":"general";
+    let lecture="";
+    if(source==="lecture"){
+      const {passages}=await retrieve(subject,c,{k:5,maxChars:5000});
+      if(passages.length) lecture=passagesForPrompt(passages); else source="general";
+    }
     const raw=await callClaude(
       `Generate 3 MCQ questions. Return ONLY JSON:\n{"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why correct"}]}`,
-      `Create 3 quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name})`
+      source==="lecture"
+        ? `Create 3 quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name}).\nEvery question must be about "${c?.name}" and answerable from these lecture passages only. Ignore any passage that is not about "${c?.name}".\n\n${lecture}`
+        : `Create 3 quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name})`
     );
-    const parsed=exJSON(raw);setQuiz(parsed?.questions||[]);setLoading(false);
+    const parsed=exJSON(raw);setQuiz(parsed?.questions||[]);setQuizUsedSource(source);setLoading(false);
   };
 
   const QuizComp=()=>{
@@ -164,7 +203,7 @@ Give a clear explanation with a practical real-world example.`,
       const old=subject.mastery[cId]||0;
       const {mastery:nw, steps}=applyAnswers(old, quiz.map((q,i)=>({correct:sel[i]===q.correct, type:"mcq"})));
       const at=Date.now();
-      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, correct:s.correct, type:"mcq", screen:"study", at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
+      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, correct:s.correct, type:"mcq", screen:"study", questionSource:quizUsedSource, at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
       const newMastery={...subject.mastery,[cId]:nw};
       const newGraph={...subject.graph,nodes:{...subject.graph.nodes,[cId]:{...subject.graph.nodes[cId],state:nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
       onUpdate({...subject,mastery:newMastery,graph:newGraph,answerLog:[...(subject.answerLog||[]),...log]});
@@ -357,6 +396,7 @@ Give a clear explanation with a practical real-world example.`,
                 {!docCollapsed&&(
                   <div style={{padding:"16px 20px",borderRadius:"0 0 10px 10px",background:"#f8fbff",border:"1px solid #bfdbfe",borderTop:"none",fontSize:14,lineHeight:1.85,color:"var(--t1)",whiteSpace:"pre-wrap"}}>
                     {m.content}
+                    <SourcesList sources={m.sources}/>
                   </div>
                 )}
               </div>
@@ -394,6 +434,7 @@ Give a clear explanation with a practical real-world example.`,
                 <div style={{maxWidth:"72%",padding:"12px 16px",borderRadius:"18px 18px 18px 4px",background:"#fff",border:"1px solid var(--b1)",fontSize:14,lineHeight:1.8,color:"var(--t2)",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
                   <div style={{fontSize:9,letterSpacing:"2px",color:"var(--t4)",fontFamily:"var(--mono)",marginBottom:6,fontWeight:700}}>🤖 AI TUTOR</div>
                   <div style={{whiteSpace:"pre-wrap"}}>{m.content}</div>
+                  <SourcesList sources={m.sources}/>
                 </div>
               </div>
             );
@@ -414,7 +455,30 @@ Give a clear explanation with a practical real-world example.`,
       {phase==="quiz"&&(
         <div>
           <div className="f g8 mb20"><button className="btn btn-ghost btn-sm" onClick={()=>setPhase("explain")}>← Back to Lesson</button></div>
-          {loading?<div className="loading"><div className="spin"/><span>Evaluation in progress — generating questions...</span></div>:<QuizComp/>}
+          {quizSetup?(()=>{
+            const cNode=graph.nodes[cId];
+            const hasDocs=!!cNode&&(subject.docs||[]).some(d=>conceptDocIds(cNode).includes(d.id));
+            const choice=hasDocs?quizSource:"general";
+            const opt=(id,icon,title,sub,color,bg,disabled)=>(
+              <div key={id} onClick={()=>!disabled&&setQuizSource(id)}
+                style={{flex:1,padding:"14px 16px",borderRadius:12,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.5:1,
+                  border:`2px solid ${choice===id?color:"var(--b1)"}`,background:choice===id?bg:"#fff"}}>
+                <div style={{fontSize:13,fontWeight:700,color:choice===id?color:"var(--t2)"}}>{icon} {title}</div>
+                <div className="txs t3 tm" style={{marginTop:4}}>{sub}</div>
+              </div>
+            );
+            return (
+              <div className="card fade">
+                <div className="card-label mb12">WHERE SHOULD THE QUESTIONS COME FROM?</div>
+                <div className="f g12 mb16">
+                  {opt("lecture","📄","From my lecture","Questions based on your uploaded lecture","#2563eb","#eff6ff",!hasDocs)}
+                  {opt("general","🧠","From general knowledge","Questions written from the concept itself","#ff6f61","#fff5f4",false)}
+                </div>
+                {!hasDocs&&<div className="txs t3 tm mb12">No uploaded document contains this concept, so questions will use general knowledge.</div>}
+                <button className="btn btn-primary" onClick={generateQuiz}>Start Quiz →</button>
+              </div>
+            );
+          })():loading?<div className="loading"><div className="spin"/><span>Evaluation in progress — generating questions...</span></div>:<QuizComp/>}
         </div>
       )}
       {phase==="result"&&(

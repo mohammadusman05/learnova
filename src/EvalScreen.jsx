@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ME, exJSON, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
+import { conceptDocIds } from './conceptExtraction.js';
+import { retrieve, passagesForPrompt } from './retrieval.js';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
   return (
@@ -73,7 +75,8 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
   // phase: select | config | quiz | results
   const [phase, setPhase] = useState(initialConceptId ? "config" : "select");
   const [selectedConcept, setSelectedConcept] = useState(initialConceptId || null);
-  const [config, setConfig] = useState({ type:"mcq", difficulty:"medium", mcqCount:10, descCount:3 });
+  const [config, setConfig] = useState({ type:"mcq", difficulty:"medium", mcqCount:10, descCount:3, source:"lecture" });
+  const [usedSource, setUsedSource] = useState("general"); // point 11: where this quiz's questions actually came from
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(false);
@@ -102,6 +105,17 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
     const diffMap = {easy:"simple and foundational",medium:"moderately challenging",hard:"advanced and analytical"};
     const diffStr = diffMap[config.difficulty];
 
+    // TA point 11: questions from the lecture (RAG passages) or from general knowledge
+    const hasDocs = !!c && (subject.docs||[]).some(d => conceptDocIds(c).includes(d.id));
+    let source = config.source==="lecture" && hasDocs ? "lecture" : "general";
+    let lectureBlock = "";
+    if(source==="lecture"){
+      const { passages } = await retrieve(subject, c, { k:6, maxChars:6000 });
+      if(passages.length) lectureBlock = `\n\nEvery question must be about "${c.name}" and answerable from these lecture passages only. Ignore any passage that is not about "${c.name}".\n\n${passagesForPrompt(passages)}`;
+      else source = "general";
+    }
+    setUsedSource(source);
+
     let qs = [];
 
     // MCQ questions
@@ -112,7 +126,7 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
 {"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why A is correct"}]}`,
         `Generate ${n} ${diffStr} MCQ questions about: "${c.name}" — ${c.definition}
 Subject: ${subject.name}
-Difficulty: ${config.difficulty}`
+Difficulty: ${config.difficulty}${lectureBlock}`
       , 4000);
       const parsed = exJSON(raw);
       if(parsed?.questions) {
@@ -128,7 +142,7 @@ Difficulty: ${config.difficulty}`
 {"questions":[{"q":"Question requiring a written explanation?","sampleAnswer":"A thorough sample answer","keyPoints":["key point 1","key point 2"]}]}`,
         `Generate ${n} ${diffStr} descriptive questions about: "${c.name}" — ${c.definition}
 Subject: ${subject.name}
-Difficulty: ${config.difficulty}`
+Difficulty: ${config.difficulty}${lectureBlock}`
       , 3000);
       const parsed = exJSON(raw);
       if(parsed?.questions) {
@@ -229,7 +243,7 @@ ${JSON.stringify(gradingInput)}`
     const old = subject.mastery[selectedConcept] || 0;
     const { mastery: nw, steps } = applyAnswers(old, graded.map(r => ({ correct: !!r.isCorrect, type: r.type === "desc" ? "desc" : "mcq" })));
     const at = Date.now();
-    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, correct: s.correct, type: s.type, screen: "evaluation", at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
+    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, correct: s.correct, type: s.type, screen: "evaluation", questionSource: usedSource, at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
     const newMastery = {...subject.mastery, [selectedConcept]: nw};
     const newGraph = {...subject.graph, nodes:{...subject.graph.nodes,[selectedConcept]:{...subject.graph.nodes[selectedConcept],state: nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
 
@@ -335,6 +349,26 @@ ${JSON.stringify(gradingInput)}`
         </div>
 
         <div className="card">
+          {(() => {
+            const hasDocs = !!concept && (subject.docs||[]).some(d => conceptDocIds(concept).includes(d.id));
+            const choice = hasDocs ? config.source : "general";
+            return (
+              <div className="mb16">
+                <div className="card-label">QUESTION SOURCE</div>
+                <div className="f g8">
+                  {[{id:"lecture",label:"📄 From my lecture",color:"#2563eb",disabled:!hasDocs},{id:"general",label:"🧠 From general knowledge",color:"#ff6f61",disabled:false}].map(s => (
+                    <div key={s.id} onClick={()=>!s.disabled&&setConfig(c=>({...c,source:s.id}))}
+                      style={{flex:1,padding:"12px",borderRadius:10,cursor:s.disabled?"not-allowed":"pointer",textAlign:"center",opacity:s.disabled?0.5:1,
+                        border:`1.5px solid ${choice===s.id?s.color:"var(--b1)"}`,
+                        background:choice===s.id?`${s.color}10`:"#fff",transition:"all 0.15s"}}>
+                      <div style={{fontSize:13,fontWeight:700,color:choice===s.id?s.color:"var(--t2)"}}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+                {!hasDocs && <div className="txs t3 tm" style={{marginTop:6}}>No uploaded document contains this concept, so questions will use general knowledge.</div>}
+              </div>
+            );
+          })()}
           <div className="card-label">DIFFICULTY</div>
           <div className="f g8 mb20">
             {[{id:"easy",label:"Easy",color:"#16a34a"},{id:"medium",label:"Medium",color:"#d97706"},{id:"hard",label:"Hard",color:"#dc2626"}].map(d => (
@@ -390,6 +424,7 @@ ${JSON.stringify(gradingInput)}`
         <span className="txs t3 tm" style={{marginLeft:16}}>
           {config.type==="mcq"?`${config.mcqCount} MCQ`:config.type==="desc"?`${config.descCount} Descriptive`:`${config.mcqCount} MCQ + ${config.descCount} Descriptive`}
           {" · "}{config.difficulty} difficulty
+          {" · "}{config.source==="lecture"&&concept&&(subject.docs||[]).some(d=>conceptDocIds(concept).includes(d.id))?"from your lecture":"from general knowledge"}
         </span>
       </div>
     </div>

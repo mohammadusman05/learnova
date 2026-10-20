@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { graphEngine, exJSON } from './utils.js';
-import { EXTRACT_PROMPT, MERGE_PROMPT, LINKS_PROMPT, stripRepeatedLines, splitIntoParts, combineConcepts, planMerge, conceptDocIds } from './conceptExtraction.js';
+import { EXTRACT_PROMPT, MERGE_PROMPT, LINKS_PROMPT, stripRepeatedLines, splitIntoPartsWithOffsets, combineConcepts, planMerge, conceptDocIds, joinPagesWithMarkers, removePageMarkers } from './conceptExtraction.js';
 import { extractPdfText, looksScanned } from './pdfText.js';
 const UploadScreen = ({ subject, onUpdate, apiKey }) => {
   const [drag,setDrag]=useState(false);
@@ -68,7 +68,7 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
           let local=null;
           try{ local=await extractPdfText(e.target.result); }catch{ local=null; }
           if(local && !looksScanned(local.text, local.numPages)){
-            await processText(local.text, file.name, 'PDF');
+            await processText(local.text, file.name, 'PDF', {pages: local.pages});
             return;
           }
           // 2. Scanned PDF (pages are photos, no selectable text) → ask Claude to read it
@@ -181,9 +181,16 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
     setLoading(true); setError(""); setStep("Analysing content...");
     const docId = `doc_${Date.now()}`;
     try{
-      // Part 4 — read the whole document
-      const cleanText = stripRepeatedLines(lec);
-      const parts = splitIntoParts(cleanText, 6000);
+      // Part 4 — read the whole document (for PDFs, also remember where each page starts — point 11)
+      let cleanText, pageStarts = null;
+      if(Array.isArray(opts.pages) && opts.pages.length){
+        const r = removePageMarkers(stripRepeatedLines(joinPagesWithMarkers(opts.pages)));
+        cleanText = r.text; pageStarts = r.pageStarts;
+      } else cleanText = stripRepeatedLines(lec);
+      const partsMeta = splitIntoPartsWithOffsets(cleanText, 6000);
+      const parts = partsMeta.map(p=>p.text);
+      // point 11: where in this document a concept was found (used to find its passages later)
+      const anchorsFor = (c) => (c.parts||[]).filter(i=>partsMeta[i]).map(i=>({docId, start:partsMeta[i].start, end:partsMeta[i].end}));
       if(!parts.length) throw new Error("No readable text found.");
 
       // Parts 2–3 — extract from every part (3 parts at a time)
@@ -248,18 +255,24 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
         if(r.existing){
           const node = ng.nodes[r.existing];
           const sources = conceptDocIds(node);
-          if(!sources.includes(docId)) ng = graphEngine.addNode(ng, {...node, sourceDocIds:[...sources, docId]});
+          ng = graphEngine.addNode(ng, {...node, sourceDocIds: sources.includes(docId) ? sources : [...sources, docId], anchors:[...(node.anchors||[]), ...anchorsFor(c)]});
           finalId[c.localId] = r.existing; mergedIds.add(r.existing);
         } else if(r.new===c.localId){
           const cid = `${subject.id}_${docId}_c${i+1}`; // unique: includes the document id
-          const {localId, ...fields} = c;
-          ng = graphEngine.addNode(ng, {...fields, id:cid, topicId, state:"NOT_LEARNED", sourceDocId:docId, sourceDocIds:[docId]});
+          const {localId, parts: _parts, ...fields} = c;
+          ng = graphEngine.addNode(ng, {...fields, id:cid, topicId, state:"NOT_LEARNED", sourceDocId:docId, sourceDocIds:[docId], anchors:anchorsFor(c)});
           if(nm[cid]===undefined) nm[cid]=0;
           finalId[c.localId] = cid; newCount++;
         }
       });
-      // duplicates inside this document point to the concept they duplicate
-      found.forEach(c=>{ const r=plan[c.localId]; if(r.new && r.new!==c.localId) finalId[c.localId]=finalId[r.new]; });
+      // duplicates inside this document point to the concept they duplicate (and add where they were found)
+      found.forEach(c=>{
+        const r=plan[c.localId];
+        if(r.new && r.new!==c.localId){
+          const target = finalId[r.new]; finalId[c.localId] = target;
+          if(target && ng.nodes[target]) ng = graphEngine.addNode(ng, {...ng.nodes[target], anchors:[...(ng.nodes[target].anchors||[]), ...anchorsFor(c)]});
+        }
+      });
 
       // prerequisite links across the whole document
       const docNodeIds = [...new Set(Object.values(finalId).filter(Boolean))];
@@ -285,6 +298,7 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
         uploadedAt: Date.now(),
         fileType: fileType,
         rawText: cleanText,
+        ...(pageStarts ? {pageStarts} : {}), // point 11: page numbers for citations
       };
       const updatedDocs = [...(subject.docs||[]), docEntry];
       onUpdate({...subject,graph:ng,mastery:nm,docs:updatedDocs});

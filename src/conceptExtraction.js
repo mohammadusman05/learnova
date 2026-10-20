@@ -73,41 +73,68 @@ export const stripRepeatedLines = (text = "", minRepeats = 3) => {
     .trim();
 };
 
-// Part 4 — split text into parts of about `size` characters, on paragraph boundaries
-export const splitIntoParts = (text = "", size = 6000) => {
-  const paras = String(text).split(/\n\s*\n/);
-  const parts = [];
-  let cur = "";
-  for (const p of paras) {
-    if (p.length > size) {
-      if (cur.trim()) { parts.push(cur.trim()); cur = ""; }
-      for (let i = 0; i < p.length; i += size) parts.push(p.slice(i, i + size).trim());
+// Part 4 — split text into parts of about `size` characters, on paragraph boundaries.
+// Also returns where each part sits in the text (start/end), so concepts can be located later (point 11).
+export const splitIntoPartsWithOffsets = (text = "", size = 6000) => {
+  const s = String(text);
+  const paras = []; const re = /\n\s*\n/g; let last = 0, m;
+  while ((m = re.exec(s))) { paras.push([last, m.index]); last = re.lastIndex; }
+  paras.push([last, s.length]);
+  const parts = []; let cur = null;
+  const push = (a, b) => { const t = s.slice(a, b).trim(); if (t) parts.push({ text: t, start: a, end: b }); };
+  for (const [a, b] of paras) {
+    if (b - a > size) {
+      if (cur) { push(cur[0], cur[1]); cur = null; }
+      for (let i = a; i < b; i += size) push(i, Math.min(b, i + size));
       continue;
     }
-    if (cur && (cur + "\n\n" + p).length > size) { parts.push(cur.trim()); cur = p; }
-    else cur = cur ? cur + "\n\n" + p : p;
+    if (cur && b - cur[0] > size) { push(cur[0], cur[1]); cur = [a, b]; }
+    else cur = cur ? [cur[0], b] : [a, b];
   }
-  if (cur.trim()) parts.push(cur.trim());
-  return parts.filter(p => p.length > 0);
+  if (cur) push(cur[0], cur[1]);
+  return parts;
 };
+export const splitIntoParts = (text = "", size = 6000) => splitIntoPartsWithOffsets(text, size).map(p => p.text);
 
-// Part 4 — combine the concepts found in each part, removing exact repeats
+// Part 4 — combine the concepts found in each part, removing exact repeats.
+// `parts` lists which parts each concept was found in (used for point 11 anchors).
 export const combineConcepts = (partResults = []) => {
   const byKey = new Map();
-  partResults.forEach(r =>
+  partResults.forEach((r, idx) =>
     (r?.concepts || []).forEach(c => {
       if (!c?.name) return;
       const k = normalizeName(c.name);
-      if (!k || byKey.has(k)) return;
+      if (!k) return;
+      if (byKey.has(k)) { const e = byKey.get(k); if (!e.parts.includes(idx)) e.parts.push(idx); return; }
       byKey.set(k, {
         name: String(c.name).trim(),
         definition: String(c.definition || "").trim(),
         importance: c.importance,
         difficulty: c.difficulty,
+        parts: [idx],
       });
     })
   );
   return [...byKey.values()];
+};
+
+// Point 11 — PDF pages are joined with markers like "[[PAGE 3]]" before cleaning.
+// This removes the markers and records where each page starts in the cleaned text.
+export const joinPagesWithMarkers = (pages = []) => pages.map((p, i) => `[[PAGE ${i + 1}]]\n${p}`).join("\n\n");
+export const removePageMarkers = (marked = "") => {
+  const re = /\[\[PAGE (\d+)\]\]\n?/g;
+  let out = "", last = 0, m; const pageStarts = [];
+  while ((m = re.exec(marked))) {
+    out += marked.slice(last, m.index);
+    pageStarts[Number(m[1]) - 1] = out.length;
+    last = re.lastIndex;
+  }
+  out += marked.slice(last);
+  // pages whose text was entirely removed (e.g. only a watermark) start where the next text starts
+  for (let i = 0; i < pageStarts.length; i++) if (pageStarts[i] === undefined) pageStarts[i] = i ? pageStarts[i - 1] : 0;
+  const text = out.replace(/^\s+/, "");
+  const shift = out.length - text.length;
+  return { text, pageStarts: pageStarts.map(x => Math.max(0, x - shift)) };
 };
 
 // Part 5 — decide, for every new concept, whether it is new, the same as an existing

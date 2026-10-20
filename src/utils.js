@@ -103,7 +103,7 @@ const subjectAvg = (subject) => {
 // ============================================================
 // ANSWER LOG EXPORT (TA point 9) — one row per answer, for checking mastery reliability
 // ============================================================
-const ANSWER_LOG_COLUMNS = ["subject","concept_id","concept_name","question","correct","answer_type","screen","date_time","mastery_before","mastery_after"];
+const ANSWER_LOG_COLUMNS = ["subject","concept_id","concept_name","question","correct","answer_type","screen","question_source","date_time","mastery_before","mastery_after"];
 const csvCell = (v) => {
   const s = v===undefined||v===null ? "" : String(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
@@ -111,7 +111,7 @@ const csvCell = (v) => {
 const answerLogCsv = (subject) => {
   const rows = (subject.answerLog||[]).map(e => [
     subject.name, e.conceptId, subject.graph?.nodes?.[e.conceptId]?.name || "", e.question,
-    e.correct ? 1 : 0, e.type, e.screen, e.at ? new Date(e.at).toISOString() : "", e.masteryBefore, e.masteryAfter,
+    e.correct ? 1 : 0, e.type, e.screen, e.questionSource || "general", e.at ? new Date(e.at).toISOString() : "", e.masteryBefore, e.masteryAfter,
   ]);
   return [ANSWER_LOG_COLUMNS, ...rows].map(r => r.map(csvCell).join(",")).join("\r\n");
 };
