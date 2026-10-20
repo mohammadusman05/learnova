@@ -11,6 +11,7 @@ import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerS
 import { FaithBadge, KeyCheckNote } from './FaithBadge.jsx';
 import { makeCaller } from './claudeApi.js';
 import { AiErrorBox } from './AiStatus.jsx';
+import Markdown from './Markdown.jsx';
 import { choiceKey, getSaved, saveExplanation } from './savedExplanations.js';
 import { scheduleAfterQuiz, dueList, nextRevisionLabel, revisionTargets, getSchedule } from './revision.js';
 
@@ -606,7 +607,7 @@ Give a clear explanation with a practical real-world example.`,
                 </div>
                 {!docCollapsed&&(
                   <div style={{padding:"16px 20px",borderRadius:"0 0 10px 10px",background:"#f8fbff",border:"1px solid #bfdbfe",borderTop:"none",fontSize:14,lineHeight:1.85,color:"var(--t1)",whiteSpace:"pre-wrap"}}>
-                    {m.content}
+                    <Markdown text={m.content}/>
                     <SourcesList sources={m.sources}/>
                     <FaithBadge check={m.check}/>
                   </div>
@@ -627,7 +628,7 @@ Give a clear explanation with a practical real-world example.`,
                 </div>
                 {!kbCollapsed&&(
                   <div style={{padding:"16px 20px",borderRadius:"0 0 10px 10px",background:"#fffaf9",border:"1px solid #ffcdc9",borderTop:"none",fontSize:14,lineHeight:1.85,color:"var(--t1)",whiteSpace:"pre-wrap"}}>
-                    {m.content}
+                    <Markdown text={m.content}/>
                   </div>
                 )}
               </div>
@@ -645,7 +646,7 @@ Give a clear explanation with a practical real-world example.`,
               <div key={i} className="fade" style={{display:"flex",justifyContent:"flex-start",marginBottom:14}}>
                 <div style={{maxWidth:"72%",padding:"12px 16px",borderRadius:"18px 18px 18px 4px",background:"#fff",border:"1px solid var(--b1)",fontSize:14,lineHeight:1.8,color:"var(--t2)",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
                   <div style={{fontSize:9,letterSpacing:"2px",color:"var(--t4)",fontFamily:"var(--mono)",marginBottom:6,fontWeight:700}}>🤖 AI TUTOR</div>
-                  <div style={{whiteSpace:"pre-wrap"}}>{m.content}</div>
+                  <Markdown text={m.content}/>
                   <SourcesList sources={m.sources}/>
                   {!stat&&<ChatNoted noted={m.noted}/>}
                   <FaithBadge check={m.check}/>

@@ -211,7 +211,7 @@ export const StudyModeCard = ({ subject, onChange }) => {
   );
   return (
     <div className="card study-mode-card">
-      <div className="card-label">STUDY MODE</div>
+      <div className="card-label">LEARNING MODE</div>
       <div className="f g8" style={{ marginTop: 8, flexWrap: "wrap" }}>{seg("adaptive")}{seg("static")}{seg("plain")}</div>
       <div className="txs t3" style={{ marginTop: 10, lineHeight: 1.7 }}>{MODES[mode].text}</div>
       {since && <div className="txs t4 tm mode-since" style={{ marginTop: 6 }}>{MODES[mode].label} since {fmt(since)}</div>}

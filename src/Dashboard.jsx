@@ -20,7 +20,7 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
     {label:"TOTAL CONCEPTS",value:total,sub:"in knowledge graph",color:"#ff6f61"},
     {label:"MASTERED",value:mastered,sub:`≥ ${MASTERY_THRESHOLD}% mastery`,color:"#16a34a"},
     {label:"AVG MASTERY",value:`${avg}%`,sub:"across all concepts",color:"#263238"},
-    stat?{label:"STUDY MODE",value:"Static",sub:"the same for every learner",color:"#475569"}
+    stat?{label:"LEARNING MODE",value:"Static",sub:"the same for every learner",color:"#475569"}
         :{label:"READY TO LEARN",value:ready.length,sub:"prerequisites cleared",color:"#e8503f"},
   ];
   // TA point 22: Plain AI chat mode — no topics or mastery, just the chat and the mode switch

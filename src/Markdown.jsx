@@ -5,7 +5,7 @@ import React from 'react';
 // code blocks, quotes, tables and dividers — instead of the raw # and ** symbols (TA point 22, AI Chat).
 // Built from React elements only (no HTML injection), so nothing in an answer can run as code.
 // ============================================================
-const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\s\n][^*\n]*\*|_[^_\s\n][^_\n]*_)/g;
+const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|(?<![\w_])__[^_\n]+__(?![\w_])|(?<![\w*])\*[^*\s](?:[^*\n]*[^*\s])?\*(?![\w*])|(?<![\w_])_[^_\s](?:[^_\n]*[^_\s])?_(?![\w_]))/g;
 export const inline = (text, keyBase = "i") => String(text ?? "").split(INLINE).filter(p => p !== "").map((p, i) => {
   const k = `${keyBase}-${i}`;
   if (p.startsWith("`") && p.endsWith("`") && p.length > 2) return <code key={k} style={{ fontFamily: "var(--mono)", fontSize: "0.9em", background: "#f1f5f9", padding: "1px 5px", borderRadius: 4 }}>{p.slice(1, -1)}</code>;
@@ -61,7 +61,7 @@ export const parseBlocks = (text) => {
 };
 
 const Markdown = ({ text }) => (
-  <div className="markdown" style={{ fontSize: 14, lineHeight: 1.75, color: "var(--t1)" }}>
+  <div className="markdown" style={{ fontSize: 14, lineHeight: 1.75, color: "inherit", whiteSpace: "normal" }}>
     {parseBlocks(text).map((b, i) => {
       const k = `b${i}`;
       if (b.type === "h") return <div key={k} className={`md-h${b.level}`} style={{ fontSize: H_SIZE[b.level], fontWeight: 800, margin: i ? "14px 0 6px" : "0 0 6px", color: "var(--t1)" }}>{inline(b.text, k)}</div>;

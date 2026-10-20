@@ -86,7 +86,7 @@ const App = () => {
     evs.forEach(e=>window.addEventListener(e,mark,{passive:true}));
     const timer=setInterval(()=>{
       if(Date.now()-lastActive.current>=IDLE_LOCK_MINUTES*60*1000){
-        setApiKey(null); setLockNotice(`Locked after ${IDLE_LOCK_MINUTES} minutes without activity — enter your API key again.`);
+        setApiKey(null); setLockNotice(`Logged out after ${IDLE_LOCK_MINUTES} minutes without activity — enter your API key again.`);
       }
     },60*1000);
     return ()=>{ evs.forEach(e=>window.removeEventListener(e,mark)); clearInterval(timer); };
@@ -218,7 +218,7 @@ const App = () => {
                   onClick={()=>selectSubject(sub.id)}>
                   <span className="subject-emoji">{sub.emoji}</span>
                   <span className="subject-name">{sub.name}</span>
-                  <span className="subject-mastery">{avg}%</span>
+                  {!isPlain(sub)&&<span className="subject-mastery">{avg}%</span>}
                   <span onClick={e=>{e.stopPropagation();deleteSubject(sub.id);}}
                     style={{marginLeft:4,fontSize:11,color:"rgba(255,100,80,0.5)",cursor:"pointer",padding:"2px 4px",borderRadius:4}}
                     onMouseEnter={e=>e.currentTarget.style.color="rgba(255,80,60,1)"}
@@ -270,7 +270,9 @@ const App = () => {
 
           {/* Footer */}
           <div className="sidebar-footer" style={{marginTop:0}}>
-            {activeSubject?(
+            {activeSubject&&plainNow?(
+              <div className="plain-footer" style={{fontSize:11,color:"rgba(255,255,255,0.45)"}}>💬 Plain AI chat · {activeSubject.emoji} {activeSubject.name}</div>
+            ):activeSubject?(
               <>
                 <div className="pbar-top">
                   <span style={{fontSize:10,color:"rgba(255,255,255,0.45)",fontFamily:"var(--mono)",letterSpacing:"1px"}}>PROGRESS</span>
