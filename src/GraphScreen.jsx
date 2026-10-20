@@ -1,7 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ME } from './utils.js';
+import { ME, graphEngine } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
-const KnowledgeGraph = ({ subject, filterDocId }) => {
+import { confirmLink, removeLink, flipLink, addLink, recheckAllLinks, linksCsv, evidenceLabel } from './prereqLinks.js';
+
+// TA point 12: how sure we are about a link
+const LinkBadge = ({ e }) => {
+  if (e.checkedBy === "person") return <span className="tag tag-green" style={{fontSize:9}}>✓ CHECKED BY PERSON</span>;
+  if (e.confidence === "high") return <span className="tag tag-teal" style={{fontSize:9}}>HIGH CONFIDENCE</span>;
+  if (e.confidence === "medium") return <span className="tag tag-yellow" style={{fontSize:9}}>MEDIUM CONFIDENCE</span>;
+  if (e.confidence === "low") return <span className="tag tag-coral" style={{fontSize:9}}>LOW CONFIDENCE</span>;
+  return <span className="tag" style={{fontSize:9,background:"var(--s3)",color:"var(--t3)",borderColor:"var(--b1)"}}>NOT CHECKED</span>;
+};
+
+const KnowledgeGraph = ({ subject, filterDocId, onGraphChange }) => {
   const { graph, mastery } = subject;
   // ...
   const allConcepts = Object.values(graph.nodes);
@@ -11,9 +22,16 @@ const KnowledgeGraph = ({ subject, filterDocId }) => {
 
   const [selected, setSelected] = useState(null);
   const [filterLayer, setFilterLayer] = useState(null);
+  const [addId, setAddId] = useState("");
+  const [linkMsg, setLinkMsg] = useState("");
 
   // Reset on doc change
   useEffect(()=>{ setSelected(null); setFilterLayer(null); },[filterDocId]);
+  useEffect(()=>{ setAddId(""); setLinkMsg(""); },[selected]);
+
+  // person's decisions on links (point 12)
+  const change = (r) => { if (r.error) { setLinkMsg(r.error); return; } setLinkMsg(""); onGraphChange && onGraphChange(r.graph); };
+  const docs = subject.docs || [];
 
   if(concepts.length === 0) return (
     <div className="empty" style={{padding:"40px 20px"}}>
@@ -203,16 +221,52 @@ const KnowledgeGraph = ({ subject, filterDocId }) => {
             </div>
           </div>
           <div className="ts t2 mb12" style={{lineHeight:1.7}}>{selConcept.definition}</div>
-          {edges.filter(e=>e.target===selConcept.id).length>0&&(
-            <div className="mb8">
-              <div className="txs t3 tm mb4">PREREQUISITES</div>
-              <div className="f fw g8">
-                {edges.filter(e=>e.target===selConcept.id).map(e=>(
-                  <div key={e.source} className="tag tag-coral" style={{cursor:"pointer"}} onClick={()=>setSelected(e.source)}>{graph.nodes[e.source]?.name}</div>
-                ))}
+          {/* Prerequisites with reason, lecture evidence and confidence; Confirm / Flip / Remove (point 12) */}
+          {(()=>{
+            const pre=(graph.edges||[]).filter(e=>e.target===selConcept.id&&graph.nodes[e.source]);
+            const existing=new Set(pre.map(e=>e.source));
+            const options=allConcepts.filter(c=>c.id!==selConcept.id&&!existing.has(c.id)&&!graphEngine.wouldCreateCycle(graph,c.id,selConcept.id))
+              .sort((a,b)=>a.name.localeCompare(b.name));
+            return (
+              <div className="mb8">
+                <div className="txs t3 tm mb4">PREREQUISITES{pre.length===0?" — none":""}</div>
+                {pre.map(e=>{
+                  const pName=graph.nodes[e.source]?.name;
+                  return (
+                    <div key={e.source} className="link-row" style={{border:"1px solid var(--b1)",borderRadius:10,padding:"8px 10px",marginBottom:6}}>
+                      <div className="f ac jb fw" style={{gap:8}}>
+                        <div className="f ac fw g8">
+                          <div className="tag tag-coral" style={{cursor:"pointer"}} onClick={()=>setSelected(e.source)}>{pName}</div>
+                          <LinkBadge e={e}/>
+                          {e.origin==="across-pdfs"&&<span className="tag" style={{fontSize:9,background:"#eff6ff",color:"#2563eb",borderColor:"#bfdbfe"}}>ACROSS PDFs</span>}
+                        </div>
+                        {onGraphChange&&<div className="f g8">
+                          {e.checkedBy!=="person"&&<button className="btn btn-secondary btn-xs" title="This link is right" onClick={()=>change({graph:confirmLink(graph,e.source,e.target)})}>✓ Confirm</button>}
+                          <button className="btn btn-secondary btn-xs" title="The direction is wrong" onClick={()=>change(flipLink(graph,docs,e.source,e.target))}>⇄ Flip</button>
+                          <button className="btn btn-danger btn-xs" title="This link is wrong" onClick={()=>change({graph:removeLink(graph,e.source,e.target)})}>✕ Remove</button>
+                        </div>}
+                      </div>
+                      {e.reason&&<div className="txs t2" style={{marginTop:6,lineHeight:1.5}}>Why: {e.reason}</div>}
+                      <div className="txs t3 tm" style={{marginTop:4,lineHeight:1.5}}>
+                        {e.evidence?`📄 “${pName}” is mentioned on ${evidenceLabel(e.evidence)}`:"📄 not mentioned in the lecture text"}
+                        {e.checkNote?` · Checker: ${e.checkNote}`:""}
+                      </div>
+                    </div>
+                  );
+                })}
+                {onGraphChange&&(
+                  <div className="f ac fw g8 mt8">
+                    <select className="input-full" style={{width:"auto",maxWidth:320,padding:"6px 10px",fontSize:12}} value={addId} onChange={ev=>setAddId(ev.target.value)}>
+                      <option value="">+ Add a prerequisite…</option>
+                      {options.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <button className="btn btn-secondary btn-xs" disabled={!addId} onClick={()=>{ change(addLink(graph,docs,addId,selConcept.id)); setAddId(""); }}>Add</button>
+                  </div>
+                )}
+                {linkMsg&&<div className="txs mt8" style={{color:"#b45309"}}>⚠ {linkMsg}</div>}
               </div>
-            </div>
-          )}
+            );
+          })()}
           {edges.filter(e=>e.source===selConcept.id).length>0&&(
             <div>
               <div className="txs t3 tm mb4">UNLOCKS</div>
@@ -243,19 +297,81 @@ const KnowledgeGraph = ({ subject, filterDocId }) => {
   );
 };
 
-const GraphScreen = ({ subject }) => {
+const GraphScreen = ({ subject, onUpdate, apiKey }) => {
   const [activeTab, setActiveTab] = useState("full");
   const [selectedDocId, setSelectedDocId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState("");
+  const [recheckMsg, setRecheckMsg] = useState(null);
+  const latest = useRef(subject); latest.current = subject;   // newest subject, so a long re-check doesn't overwrite later changes
   const docs = subject.docs || [];
+  const links = (subject.graph.edges || []).filter(e => e.type === "prerequisite");
+  const byPerson = links.filter(e => e.checkedBy === "person").length;
+  const onGraphChange = onUpdate ? (g) => onUpdate({ ...latest.current, graph: g }) : null;
+
+  // ── Claude text API (same as the Upload screen) ──
+  const callClaude = async (sys, usr, mt = 1500, temperature) => {
+    const body = { model: "claude-haiku-4-5-20251001", max_tokens: mt, system: sys, messages: [{ role: "user", content: usr }] };
+    if (temperature !== undefined) body.temperature = temperature;
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error.message || "API error");
+    return d.content?.[0]?.text || "";
+  };
+
+  // TA point 12: find links again across all PDFs and check every AI link a second time
+  const recheck = async () => {
+    setBusy(true); setRecheckMsg(null); setStep("Starting...");
+    try {
+      const r = await recheckAllLinks(callClaude, latest.current.graph, latest.current.docs || [], setStep);
+      onUpdate({ ...latest.current, graph: { ...latest.current.graph, edges: r.graph.edges, removedLinks: r.graph.removedLinks } });
+      const s = r.stats;
+      setRecheckMsg({ ok: s.problems.length === 0,
+        text: `Re-check done: ${s.kept} AI link${s.kept !== 1 ? "s" : ""} kept (${s.added} new) · ${s.dropped} dropped · ${s.reversed} direction${s.reversed !== 1 ? "s" : ""} corrected · ${s.personKept} link${s.personKept !== 1 ? "s" : ""} checked by a person left as they are.`
+          + (s.unchecked ? ` ${s.unchecked} could not be checked (marked “not checked”).` : ""),
+        problems: s.problems });
+    } catch (e) { setRecheckMsg({ ok: false, text: `Re-check failed: ${e.message}`, problems: [] }); }
+    setBusy(false); setStep("");
+  };
+
+  // links CSV (for measuring link accuracy later — TA point 13)
+  const downloadLinks = () => {
+    const csv = "﻿" + linksCsv(subject);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = (subject.name || "subject").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const d = new Date();
+    const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    a.href = url; a.download = `learnova-links-${slug}-${ymd}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   return (
     <div className="fade">
-      <div className="f jb ac mb16">
+      <div className="f jb ac mb16 fw" style={{gap:12}}>
         <div>
           <div className="section-title">Knowledge Graph</div>
-          <div className="section-sub">{subject.emoji} {subject.name} · {Object.values(subject.graph.nodes).length} concepts</div>
+          <div className="section-sub">{subject.emoji} {subject.name} · {Object.values(subject.graph.nodes).length} concepts · {links.length} prerequisite link{links.length!==1?"s":""}{byPerson?` (${byPerson} checked by a person)`:""}</div>
+        </div>
+        <div className="f g8">
+          {onUpdate&&<button className="btn btn-secondary btn-sm" onClick={recheck} disabled={busy||Object.keys(subject.graph.nodes).length<2}>{busy?"⏳ Re-checking…":"🔄 Re-check links"}</button>}
+          <button className="btn btn-secondary btn-sm" onClick={downloadLinks} disabled={links.length===0&&!(subject.graph.removedLinks||[]).length}>⬇ Links CSV</button>
         </div>
       </div>
+      {(busy||recheckMsg)&&(
+        <div className="card mb16" style={{fontSize:12,padding:"12px 16px",...(recheckMsg&&!recheckMsg.ok?{borderColor:"#fcd34d",background:"#fffbeb"}:{})}}>
+          {busy?<div>⏳ {step}</div>:<>
+            <div>{recheckMsg.ok?"✅":"⚠"} {recheckMsg.text}</div>
+            {recheckMsg.problems?.length>0&&<div style={{marginTop:4}}>Problems: {recheckMsg.problems.join(" · ")}</div>}
+          </>}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="f g8 mb20">
@@ -271,7 +387,7 @@ const GraphScreen = ({ subject }) => {
 
       {/* Full graph tab */}
       {activeTab==="full"&&(
-        <KnowledgeGraph subject={subject} filterDocId={null}/>
+        <KnowledgeGraph subject={subject} filterDocId={null} onGraphChange={onGraphChange}/>
       )}
 
       {/* PDF-wise tab */}
@@ -308,7 +424,7 @@ const GraphScreen = ({ subject }) => {
 
               {/* Graph for selected doc */}
               {selectedDocId?(
-                <KnowledgeGraph subject={subject} filterDocId={selectedDocId}/>
+                <KnowledgeGraph subject={subject} filterDocId={selectedDocId} onGraphChange={onGraphChange}/>
               ):(
                 <div className="empty" style={{padding:"32px 20px"}}>
                   <div className="empty-icon">☝️</div>

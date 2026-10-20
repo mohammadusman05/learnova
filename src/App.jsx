@@ -238,7 +238,7 @@ const App = () => {
             {screen==="dashboard"&&activeSubject&&<Dashboard subject={activeSubject} onNavigate={navigate} onUpdate={updateSubject}/>}
             {screen==="upload"&&activeSubject&&<UploadScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey}/>}
             {screen==="library"&&activeSubject&&<LibraryScreen subject={activeSubject}/>}
-            {screen==="graph"&&activeSubject&&<GraphScreen subject={activeSubject} onSelect={id=>navigate("learn",id)}/>}
+            {screen==="graph"&&activeSubject&&<GraphScreen subject={activeSubject} onSelect={id=>navigate("learn",id)} onUpdate={updateSubject} apiKey={apiKey}/>}
             {screen==="learn"&&activeSubject&&<LearnScreen key={learnId} subject={activeSubject} onUpdate={updateSubject} initialId={learnId} apiKey={apiKey} onGoToEval={(cId)=>{setEvalConceptId(cId);setScreen("eval");}}/>}
             {screen==="eval"&&activeSubject&&<EvalScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey} initialConceptId={evalConceptId} onClearConcept={()=>setEvalConceptId(null)}/>}
           </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { graphEngine, exJSON } from './utils.js';
-import { EXTRACT_PROMPT, MERGE_PROMPT, LINKS_PROMPT, stripRepeatedLines, splitIntoPartsWithOffsets, combineConcepts, planMerge, conceptDocIds, joinPagesWithMarkers, removePageMarkers } from './conceptExtraction.js';
+import { EXTRACT_PROMPT, MERGE_PROMPT, stripRepeatedLines, splitIntoPartsWithOffsets, combineConcepts, planMerge, conceptDocIds, joinPagesWithMarkers, removePageMarkers } from './conceptExtraction.js';
+import { linkNewDocument } from './prereqLinks.js';
 import { extractPdfText, looksScanned } from './pdfText.js';
 const UploadScreen = ({ subject, onUpdate, apiKey }) => {
   const [drag,setDrag]=useState(false);
@@ -176,7 +177,7 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
   // ── CONCEPT EXTRACTION (TA point 6: concept granularity) ──
   // 1. remove repeated lines (watermarks/footers)  2. split into parts
   // 3. extract concepts from every part  4. combine  5. merge with existing concepts
-  // 6. prerequisite links across the whole document  7. save full text
+  // 6. save full text  7. prerequisite links inside this PDF and to earlier PDFs, each checked (point 12)
   const processText=async(lec, fileName='Pasted Text', fileType='TEXT', opts={})=>{
     setLoading(true); setError(""); setStep("Analysing content...");
     const docId = `doc_${Date.now()}`;
@@ -274,20 +275,7 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
         }
       });
 
-      // prerequisite links across the whole document
       const docNodeIds = [...new Set(Object.values(finalId).filter(Boolean))];
-      if(docNodeIds.length>1){
-        setStep("Finding prerequisite links...");
-        const lIds = {}; // l1 → node id
-        const linkList = docNodeIds.map((id,i)=>{ lIds[`l${i+1}`]=id; const n=ng.nodes[id]; return `l${i+1}: ${n.name} — ${n.definition||""}`; }).join("\n");
-        try{
-          const raw = await callClaude(LINKS_PROMPT, linkList, 3000, 0);
-          (exJSON(raw)?.relationships||[]).forEach(r=>{
-            const s=lIds[r?.source], t=lIds[r?.target];
-            if(s && t && s!==t) ng = graphEngine.addEdge(ng, s, t, "prerequisite");
-          });
-        }catch{ /* concepts are still saved without links */ }
-      }
 
       // Part 4 — save the full text (no 50,000-character cut)
       const docEntry = {
@@ -301,6 +289,14 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
         ...(pageStarts ? {pageStarts} : {}), // point 11: page numbers for citations
       };
       const updatedDocs = [...(subject.docs||[]), docEntry];
+
+      // TA point 12 — prerequisite links: inside this PDF + to earlier PDFs, each checked a second time
+      let links = { within:0, across:0, dropped:0, reversed:0, unchecked:0, problems:[] };
+      try{
+        const r = await linkNewDocument(callClaude, ng, updatedDocs, docNodeIds, setStep);
+        ng = r.graph; links = r.stats;
+      }catch(err){ links.problems = [err.message]; } // concepts are still saved; the warning says what failed
+
       onUpdate({...subject,graph:ng,mastery:nm,docs:updatedDocs});
       setResult({
         topic,
@@ -310,6 +306,7 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
         failedParts,
         totalParts: parts.length,
         truncated: !!opts.truncated,
+        links,
         concepts: docNodeIds.map(id=>({...ng.nodes[id], merged: mergedIds.has(id)})),
       });
       setStep("");
@@ -321,10 +318,17 @@ const UploadScreen = ({ subject, onUpdate, apiKey }) => {
     <div className="fade">
       <div className="section-title">Content Processed ✓</div>
       <div className="section-sub">{result.count} concepts found · {result.newCount} new · {result.mergedCount} already in {subject.name}</div>
-      {(result.truncated||result.failedParts>0)&&(
+      {(result.truncated||result.failedParts>0||result.links?.problems?.length>0||result.links?.unchecked>0)&&(
         <div className="card mb16" style={{borderColor:"#fcd34d",background:"#fffbeb",fontSize:12}}>
           {result.truncated&&<div>⚠ This PDF is very long — only about the first 50 pages of text were read.</div>}
           {result.failedParts>0&&<div>⚠ {result.failedParts} of {result.totalParts} parts could not be read. Upload again to retry.</div>}
+          {result.links?.problems?.length>0&&<div>⚠ Some prerequisite links could not be made or checked ({result.links.problems.join(" · ")}). Open Knowledge Graph and click “Re-check links”.</div>}
+          {result.links?.unchecked>0&&<div>⚠ {result.links.unchecked} link{result.links.unchecked!==1?"s were":" was"} saved without the second check (marked “not checked”).</div>}
+        </div>
+      )}
+      {result.links&&(
+        <div className="card mb16" style={{fontSize:12}}>
+          🔗 <b>Prerequisite links:</b> {result.links.within} inside this PDF · {result.links.across} to earlier PDFs · {result.links.dropped} dropped by the check{result.links.reversed>0?` · ${result.links.reversed} direction${result.links.reversed!==1?"s":""} corrected`:""}
         </div>
       )}
       {imgPreview&&<div className="mb16"><img src={imgPreview} alt="Uploaded" style={{maxHeight:120,borderRadius:8,border:"1px solid var(--b1)"}}/></div>}

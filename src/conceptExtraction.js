@@ -34,13 +34,7 @@ Return ONLY valid JSON, nothing else:
 {"sameAsExisting":[{"new":"n1","existing":"e3"}],"duplicatesWithinNew":[{"keep":"n2","drop":"n5"}]}
 Use empty lists when there are no matches.`;
 
-// Prerequisite links among one document's concepts (runs after parts are combined,
-// so links between concepts found in different parts are not lost)
-export const LINKS_PROMPT = `You are given the concepts from one lecture document.
-List prerequisite links: A is a prerequisite of B only if B genuinely cannot be understood without first understanding A. Do not link concepts that are merely related.
-Return ONLY valid JSON, nothing else:
-{"relationships":[{"source":"l1","target":"l2"}]}
-where "source" is the prerequisite. Use an empty list if there are none.`;
+// Prerequisite-link prompts moved to prereqLinks.js (TA point 12)
 
 // Lower-case, drop punctuation, collapse spaces, drop simple plural "s"
 export const normalizeName = (name = "") =>

@@ -4,10 +4,11 @@
 const createGraph = () => ({ nodes: {}, edges: [] });
 const graphEngine = {
   addNode(g, c) { return { ...g, nodes: { ...g.nodes, [c.id]: c } }; },
-  addEdge(g, src, tgt, type="prerequisite") {
+  // extra = details saved on the link (point 12: reason, evidence, confidence, who checked it)
+  addEdge(g, src, tgt, type="prerequisite", extra={}) {
     if (type==="prerequisite" && graphEngine.wouldCreateCycle(g, src, tgt)) return g;
     if (g.edges.some(e=>e.source===src&&e.target===tgt&&e.type===type)) return g;
-    return { ...g, edges: [...g.edges, { source:src, target:tgt, type }] };
+    return { ...g, edges: [...g.edges, { ...extra, source:src, target:tgt, type }] };
   },
   wouldCreateCycle(g, src, tgt) {
     const v=new Set(), s=[tgt];
