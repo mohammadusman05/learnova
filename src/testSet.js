@@ -4,11 +4,13 @@
 // Question | Option A | Option B | Option C | Option D | Correct | Explanation (optional).
 //   • the same questions for every learner, in every learning mode (Adaptive, Static, Plain AI chat)
 //   • a learner's 1st attempt = PRE-test (score only, no answers shown), 2nd attempt = POST-test, later = retake
+//   • one question set (Set A) → used for both; a second set (Set B, optional) → Set A for the pre-test, Set B for the
+//     post-test and retakes (two equally hard sets, so learners don't meet the same questions twice)
 //   • normalised gain = (post − pre) / (100 − pre): how much of the possible improvement the learner made
 //   • no AI involved and mastery is NOT changed — the test only measures (point 24)
 //   • pre_test_before_study: was the pre-test taken before any studying of this subject? (rows with "no" are left
 //     out of the analysis)
-// subject.test (the questions) travels with "Export subject"; subject.testAttempts (answers) stay in the browser.
+// subject.test (Set A) and subject.testPost (Set B) travel with "Export subject"; subject.testAttempts stay in the browser.
 // ============================================================
 import { currentLearnerCode } from './privacy.js';
 import { getStudyMode } from './studyMode.js';
@@ -142,13 +144,23 @@ export const readTestFile = async (file) => {
 };
 
 // ── the test on the subject ──
-export const getTest = (subject) => subject?.test && subject.test.questions?.length ? subject.test : null;
+export const getTest = (subject) => subject?.test && subject.test.questions?.length ? subject.test : null;           // Set A (pre-test)
+export const getPostTest = (subject) => getTest(subject) && subject?.testPost?.questions?.length ? subject.testPost : null;   // Set B (optional)
 /** only in a subject you created yourself (faculty); in a subject imported from a shared file the test is locked */
 export const canEditTest = (subject) => !subject?.importedFrom;
-export const setTest = (subject, { name, questions }, now = Date.now()) => ({ ...subject, test: { id: `test_${now}`, name, uploadedAt: now, questions } });
+/** slot "pre" = Set A (a new Set A starts a new pre-test), slot "post" = Set B */
+export const setTest = (subject, { name, questions }, now = Date.now(), slot = "pre") =>
+  ({ ...subject, [slot === "post" ? "testPost" : "test"]: { id: `test_${now}`, name, uploadedAt: now, questions } });
+export const removePostTest = (subject) => { const { testPost, ...rest } = subject; return rest; };
 
-export const attemptsFor = (subject, testId = getTest(subject)?.id) => (subject?.testAttempts || []).filter(a => a.testId === testId).sort((a, b) => a.at - b.at);
+// attempts belong to the current Set A ("pairId"); attempts saved before Set B existed only have testId
+export const attemptsFor = (subject, pairId = getTest(subject)?.id) => (subject?.testAttempts || []).filter(a => (a.pairId || a.testId) === pairId).sort((a, b) => a.at - b.at);
 export const nextKind = (subject) => { const n = attemptsFor(subject).length; return n === 0 ? "pre" : n === 1 ? "post" : "retake"; };
+/** the set the next attempt uses: Set A for the pre-test; Set B (if uploaded) for the post-test and retakes */
+export const nextSet = (subject) => nextKind(subject) === "pre" || !getPostTest(subject) ? getTest(subject) : getPostTest(subject);
+export const setLetter = (subject, set) => set && getPostTest(subject) && set.id === getPostTest(subject).id ? "B" : "A";
+/** the question set an attempt was taken with (null if it has since been replaced) */
+export const setOf = (subject, attempt) => [getTest(subject), getPostTest(subject)].find(t => t && t.id === attempt.testId) || null;
 export const normalisedGain = (pre, post) => (pre === null || pre === undefined || post === null || post === undefined || pre >= 100) ? null : Math.round(100 * (post - pre) / (100 - pre)) / 100;
 
 const shuffle = (arr, rand) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -179,7 +191,7 @@ export const firstStudyAt = (subject) => {
 
 /** picks: {qid: index in the paper's options} → {subject (with the attempt saved), attempt} */
 export const gradeAttempt = (subject, paper, picks, startedAt, finishedAt = Date.now()) => {
-  const test = getTest(subject);
+  const test = nextSet(subject), pairId = getTest(subject).id;
   const kind = nextKind(subject);
   const byId = Object.fromEntries(test.questions.map(q => [q.id, q]));
   const answers = paper.map(p => {
@@ -190,7 +202,7 @@ export const gradeAttempt = (subject, paper, picks, startedAt, finishedAt = Date
   const correct = answers.filter(a => a.correct).length, total = answers.length;
   const studied = firstStudyAt(subject);
   const attempt = {
-    id: `att_${finishedAt}`, testId: test.id, testName: test.name, kind, at: startedAt, finishedAt,
+    id: `att_${finishedAt}`, pairId, testId: test.id, testName: test.name, set: setLetter(subject, test), kind, at: startedAt, finishedAt,
     correct, total, score: Math.round(100 * correct / total), mode: getStudyMode(subject), answers,
     ...(kind === "pre" ? { preBeforeStudy: studied === null || studied >= startedAt } : {}),
   };
@@ -205,17 +217,17 @@ export const testSummary = (subject) => {
 };
 
 // ── results CSV (point 25: pre, post and gain per learner and mode) ──
-const COLUMNS = ["subject", "learner_code", "test_name", "attempt_no", "kind", "study_mode", "started_at", "finished_at", "minutes", "correct", "total", "score_pct",
+const COLUMNS = ["subject", "learner_code", "test_name", "question_set", "attempt_no", "kind", "study_mode", "started_at", "finished_at", "minutes", "correct", "total", "score_pct",
   "pre_score_pct", "post_score_pct", "normalised_gain", "pre_test_before_study", "answers"];
 const L = "ABCD";
 export const testResultsCsv = (subject, learnerCode = currentLearnerCode()) => {
   const rows = [];
-  const tests = [...new Set((subject.testAttempts || []).map(a => a.testId))];
+  const tests = [...new Set((subject.testAttempts || []).map(a => a.pairId || a.testId))];
   for (const tid of tests) {
     const list = attemptsFor(subject, tid);
     const pre = list[0]?.score ?? null, post = list[1]?.score ?? null;
     list.forEach((a, i) => rows.push([
-      subject.name, learnerCode, a.testName || "", i + 1, a.kind, a.mode || "", new Date(a.at).toISOString(), new Date(a.finishedAt).toISOString(),
+      subject.name, learnerCode, a.testName || "", a.set || "A", i + 1, a.kind, a.mode || "", new Date(a.at).toISOString(), new Date(a.finishedAt).toISOString(),
       Math.round((a.finishedAt - a.at) / 6000) / 10, a.correct, a.total, a.score,
       pre ?? "", i >= 1 ? post ?? "" : "", i === 1 ? normalisedGain(pre, post) ?? "" : "", i === 0 ? (a.preBeforeStudy ? "yes" : "no") : "",
       a.answers.map((x, n) => `${x.qid}=${x.picked === null ? "-" : L[x.picked]}${x.correct ? "✓" : "✗"}`).join(" "),

@@ -32,6 +32,7 @@ export const exportSubject = (subject, now = Date.now()) => {
       docs: (subject.docs || []).map(d => ({ ...d })),
       graph: { ...g, nodes, edges: [...(g.edges || [])], removedLinks: [...(g.removedLinks || [])] },
       ...(subject.test ? { test: subject.test } : {}),   // point 23: the faculty's uploaded test (questions only, no results)
+      ...(subject.test && subject.testPost ? { testPost: subject.testPost } : {}),   // optional second set for the post-test
     },
   };
 };
@@ -70,6 +71,7 @@ export const importSubject = (subjects, data, now = Date.now()) => {
       graph: { ...s.graph, nodes: Object.fromEntries(Object.entries(s.graph.nodes).map(([id, n]) => [id, sharedNode(n)])), edges: [...(s.graph.edges || [])], removedLinks: [...(s.graph.removedLinks || [])] },
       mastery: {}, importedFrom: { exportedAt: data.exportedAt || null, importedAt: now },
       ...(s.test ? { test: s.test } : {}),
+      ...(s.test && s.testPost ? { testPost: s.testPost } : {}),
     };
     counts.newDocs = counts.docs; counts.newConcepts = counts.concepts;
     return { subjects: all, id: s.id, mode: "new", counts };
@@ -94,6 +96,8 @@ export const importSubject = (subjects, data, now = Date.now()) => {
     edges: [...(s.graph.edges || []), ...(lg.edges || []).filter(touchesOwn)],
     removedLinks: [...(s.graph.removedLinks || []), ...(lg.removedLinks || []).filter(touchesOwn)],
   };
-  all[s.id] = { ...local, docs, graph, importedFrom: { exportedAt: data.exportedAt || null, importedAt: now }, ...(s.test ? { test: s.test } : {}) };
+  const updated = { ...local, docs, graph, importedFrom: { exportedAt: data.exportedAt || null, importedAt: now } };
+  if (s.test) { updated.test = s.test; if (s.testPost) updated.testPost = s.testPost; else delete updated.testPost; }   // the file decides both sets
+  all[s.id] = updated;
   return { subjects: all, id: s.id, mode: "updated", counts };
 };

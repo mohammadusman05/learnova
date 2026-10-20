@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { getTest, canEditTest, setTest, readTestFile, templateCsv, attemptsFor, nextKind, makePaper, gradeAttempt, testSummary, normalisedGain } from './testSet.js';
+import { getTest, getPostTest, removePostTest, canEditTest, setTest, readTestFile, templateCsv, attemptsFor, nextKind, nextSet, setOf, makePaper, gradeAttempt, testSummary, normalisedGain } from './testSet.js';
 
 // ============================================================
 // TA point 23 — the faculty's uploaded test, at the top of Evaluation (all learning modes)
 // 1st attempt = pre-test (score only), 2nd = post-test (score, gain and answers), later = retake.
+// Set A is used for the pre-test; an optional Set B for the post-test and retakes (else Set A again).
 // Upload / replace only in a subject you created yourself; locked in a subject imported from a shared file.
 // ============================================================
 const KIND = { pre: "Pre-test", post: "Post-test", retake: "Retake" };
@@ -37,34 +38,35 @@ const Review = ({ test, attempt }) => {
 };
 
 const UploadedTest = ({ subject, onUpdate, onActive }) => {
-  const test = getTest(subject);
+  const test = getTest(subject), post = getPostTest(subject);
   const editable = canEditTest(subject);
   const [paper, setPaper] = useState(null);          // taking the test
+  const [paperSet, setPaperSet] = useState(null);    // the question set of this paper (A or B)
   const [picks, setPicks] = useState({});
   const [startedAt, setStartedAt] = useState(0);
   const [result, setResult] = useState(null);        // the attempt just finished
   const [msg, setMsg] = useState(null);
-  const [replace, setReplace] = useState(null);      // a parsed file waiting for "replace?" confirmation
+  const [replace, setReplace] = useState(null);      // a parsed Set A waiting for "replace?" confirmation
   const [showAnswers, setShowAnswers] = useState(false);
-  const fileRef = React.useRef(null);
+  const fileRef = React.useRef(null), postRef = React.useRef(null);
   const sum = testSummary(subject);
   const attempts = attemptsFor(subject);
   const active = (v) => onActive && onActive(v);
 
-  const upload = async (e) => {
+  const upload = (slot) => async (e) => {
     const f = e.target.files?.[0]; e.target.value = "";
     if (!f) return;
     setMsg(null);
     try {
       const r = await readTestFile(f);
-      if (test && attempts.length) setReplace(r); else apply(r);
+      if (slot === "pre" && test && attempts.length) setReplace(r); else apply(r, slot);
     } catch (err) { setMsg({ ok: false, text: err.message }); }
   };
-  const apply = (r) => {
-    onUpdate(setTest(subject, r));
+  const apply = (r, slot = "pre") => {
+    onUpdate(setTest(subject, r, Date.now(), slot));
     setReplace(null);
     const sk = r.skipped.length ? ` · ${r.skipped.length} row${r.skipped.length !== 1 ? "s" : ""} skipped: ${r.skipped.slice(0, 3).map(x => `row ${x.row} (${x.reason})`).join(", ")}${r.skipped.length > 3 ? "…" : ""}` : "";
-    setMsg({ ok: true, text: `Uploaded "${r.name}": ${r.questions.length} question${r.questions.length !== 1 ? "s" : ""}${sk}` });
+    setMsg({ ok: true, text: `${slot === "post" ? "Post-test set (B)" : "Pre-test set (A)"}: uploaded "${r.name}" — ${r.questions.length} question${r.questions.length !== 1 ? "s" : ""}${sk}` });
   };
   const template = async () => {
     try {
@@ -73,7 +75,7 @@ const UploadedTest = ({ subject, onUpdate, onActive }) => {
       document.body.appendChild(a); a.click(); a.remove();
     } catch { save(new Blob(["﻿" + templateCsv()], { type: "text/csv;charset=utf-8" }), "learnova-test-template.csv"); }
   };
-  const start = () => { setPaper(makePaper(test)); setPicks({}); setStartedAt(Date.now()); setResult(null); setShowAnswers(false); active(true); };
+  const start = () => { const set = nextSet(subject); setPaperSet(set); setPaper(makePaper(set)); setPicks({}); setStartedAt(Date.now()); setResult(null); setShowAnswers(false); active(true); };
   const submit = () => {
     const g = gradeAttempt(subject, paper, picks, startedAt, Date.now());
     onUpdate(g.subject);
@@ -90,7 +92,7 @@ const UploadedTest = ({ subject, onUpdate, onActive }) => {
         <div className="f ac jb mb16" style={{ flexWrap: "wrap", gap: 10 }}>
           <div>
             <div className="tag tag-coral mb8">📋 {KIND[kind]}</div>
-            <div className="section-title" style={{ marginBottom: 2 }}>{test.name}</div>
+            <div className="section-title" style={{ marginBottom: 2 }}>{paperSet?.name || test.name}{post ? ` (Set ${paperSet?.id === post.id ? "B" : "A"})` : ""}</div>
             <div className="txs t3">The same questions for every learner · no AI · your mastery is not changed</div>
           </div>
           <div style={{ textAlign: "right" }}><div style={{ fontSize: 22, fontWeight: 800, color: "#ff6f61" }}>{answered}/{paper.length}</div><div className="txs t3 tm">answered</div></div>
@@ -131,7 +133,7 @@ const UploadedTest = ({ subject, onUpdate, onActive }) => {
                 Pre-test {sum.pre}% → Post-test {sum.post}% · <b>Normalised gain {gainText(normalisedGain(sum.pre, sum.post))}</b>
               </div>
             )}
-            <Review test={test} attempt={result} />
+            {setOf(subject, result) && <Review test={setOf(subject, result)} attempt={result} />}
           </>
         )}
         <button className="btn btn-secondary btn-sm mt16 test-back" onClick={done}>← Back to Evaluation</button>
@@ -145,22 +147,36 @@ const UploadedTest = ({ subject, onUpdate, onActive }) => {
     <div className="card mb24 uploaded-test" style={{ padding: 18, borderColor: "#c7d2fe", background: "#fafbff" }}>
       <div className="f ac jb" style={{ flexWrap: "wrap", gap: 10 }}>
         <div className="card-label" style={{ margin: 0, color: "#4338ca" }}>📋 UPLOADED TEST (SAME FOR EVERYONE)</div>
-        {editable && (
-          <div className="f g8">
-            <button className="btn btn-ghost btn-xs test-template" onClick={template}>⬇ Excel template</button>
-            <button className="btn btn-secondary btn-xs upload-test" onClick={() => fileRef.current?.click()}>⬆ {test ? "Replace questions" : "Upload questions"}</button>
-            <input ref={fileRef} type="file" accept=".xlsx,.csv,.xls" style={{ display: "none" }} onChange={upload} />
+        {editable && <button className="btn btn-ghost btn-xs test-template" onClick={template}>⬇ Excel template</button>}
+        <input ref={fileRef} type="file" accept=".xlsx,.csv,.xls" style={{ display: "none" }} onChange={upload("pre")} />
+        <input ref={postRef} type="file" accept=".xlsx,.csv,.xls" style={{ display: "none" }} onChange={upload("post")} />
+      </div>
+      {!test && (
+        <div className="txs t2 test-info" style={{ marginTop: 8, lineHeight: 1.8 }}>
+          {editable ? "No test yet. Upload the faculty's questions as an Excel (.xlsx) or CSV file — one row per question: Question, Option A–D, Correct." : "No test in this subject yet — your faculty adds it to the shared subject file."}
+          {editable && <div style={{ marginTop: 6 }}><button className="btn btn-secondary btn-xs upload-test" onClick={() => fileRef.current?.click()}>⬆ Upload pre-test questions (Set A)</button></div>}
+        </div>
+      )}
+      {test && (
+        <div className="test-sets txs t2" style={{ marginTop: 8, lineHeight: 1.9 }}>
+          <div className="f ac g8 test-info" style={{ flexWrap: "wrap" }}>
+            <span style={{ minWidth: 175 }}><b>Pre-test questions (Set A):</b></span>
+            <span><b>{test.name}</b> · {test.questions.length} question{test.questions.length !== 1 ? "s" : ""} · uploaded {fmtDay(test.uploadedAt)}</span>
+            {editable && <button className="btn btn-ghost btn-xs upload-test" onClick={() => fileRef.current?.click()}>⬆ Replace</button>}
           </div>
-        )}
-      </div>
-      <div className="txs t2 test-info" style={{ marginTop: 8, lineHeight: 1.8 }}>
-        {test
-          ? <><b>{test.name}</b> · {test.questions.length} question{test.questions.length !== 1 ? "s" : ""} · uploaded {fmtDay(test.uploadedAt)}</>
-          : editable ? "No test yet. Upload the faculty's questions as an Excel (.xlsx) or CSV file — one row per question: Question, Option A–D, Correct." : "No test in this subject yet — your faculty adds it to the shared subject file."}
-      </div>
+          <div className="f ac g8 test-info-post" style={{ flexWrap: "wrap" }}>
+            <span style={{ minWidth: 175 }}><b>Post-test questions (Set B):</b></span>
+            {post
+              ? <span><b>{post.name}</b> · {post.questions.length} question{post.questions.length !== 1 ? "s" : ""} · uploaded {fmtDay(post.uploadedAt)}</span>
+              : <span className="t3">{editable ? "optional — if empty, Set A is used again" : "the same questions as the pre-test"}</span>}
+            {editable && <button className="btn btn-ghost btn-xs upload-post" onClick={() => postRef.current?.click()}>⬆ {post ? "Replace" : "Upload"}</button>}
+            {editable && post && <button className="btn btn-ghost btn-xs remove-post" onClick={() => { onUpdate(removePostTest(subject)); setMsg({ ok: true, text: "Post-test set removed — the post-test will use Set A again." }); }}>✕ Remove</button>}
+          </div>
+        </div>
+      )}
       {replace && (
         <div className="replace-confirm" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fde68a", fontSize: 13 }}>
-          Replace the test with "{replace.name}" ({replace.questions.length} questions)? Earlier results stay saved, but the new test starts a new pre-test.
+          Replace the pre-test questions (Set A) with "{replace.name}" ({replace.questions.length} questions)? Earlier results stay saved, but the new set starts a new pre-test.
           <div className="f g8" style={{ marginTop: 8 }}>
             <button className="btn btn-primary btn-xs confirm-replace" onClick={() => apply(replace)}>Yes, replace</button>
             <button className="btn btn-ghost btn-xs" onClick={() => setReplace(null)}>Cancel</button>
@@ -179,7 +195,7 @@ const UploadedTest = ({ subject, onUpdate, onActive }) => {
           {kind === "retake" && <span className="txs show-answers" style={{ cursor: "pointer", textDecoration: "underline", color: "var(--t3)" }} onClick={() => setShowAnswers(v => !v)}>{showAnswers ? "Hide" : "Show"} post-test answers</span>}
         </div>
       )}
-      {test && kind === "retake" && showAnswers && <Review test={test} attempt={attempts[1]} />}
+      {test && kind === "retake" && showAnswers && setOf(subject, attempts[1]) && <Review test={setOf(subject, attempts[1])} attempt={attempts[1]} />}
     </div>
   );
 };
