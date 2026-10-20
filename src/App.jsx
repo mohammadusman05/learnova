@@ -106,6 +106,8 @@ const App = () => {
   const [screen,setScreen]=useState("home"); // home | dashboard | upload | graph | learn | eval
   const [learnId,setLearnId]=useState(null);
   const [learnMode,setLearnMode]=useState(null); // point 17: "revise" opens a revision quiz directly
+  const [learnReset,setLearnReset]=useState(0);  // clicking the Study tab again goes back to the Study home
+  const [sideOpen,setSideOpen]=useState("subjects"); // sidebar: "subjects" expanded, or "user" (User Management) expanded
   const [evalConceptId,setEvalConceptId]=useState(null);
   const [showNewSubject,setShowNewSubject]=useState(false);
 
@@ -195,7 +197,10 @@ const App = () => {
 
           {/* Subject Switcher */}
           <div className="subject-switcher">
-            <div className="subject-switcher-label">SUBJECTS</div>
+            <div className="subject-switcher-label subjects-toggle" style={{cursor:"pointer",display:"flex",alignItems:"center",userSelect:"none"}} onClick={()=>setSideOpen("subjects")}>
+              SUBJECTS<span style={{marginLeft:"auto"}}>{sideOpen==="subjects"?"▾":`▸ ${Object.keys(subjects).length}`}</span>
+            </div>
+            {sideOpen==="subjects"&&<>
             {/* All Subjects link */}
             <div className={`subject-item ${screen==="home"?"active":""}`} onClick={()=>{setActiveSubjectId(null);setScreen("home");}}>
               <span className="subject-emoji">🏠</span>
@@ -216,38 +221,50 @@ const App = () => {
                 </div>
               );
             })}
-            {/* Storage indicator */}
-            <StorageBar/>
             <div className="add-subject-btn" onClick={()=>setShowNewSubject(true)}>
               <span style={{fontSize:14}}>＋</span>
               <span>New Subject</span>
             </div>
-            {/* TA point 18 */}
-            <div className={`nav-item data-nav ${screen==="data"?"active":""}`} style={{marginTop:6}} onClick={()=>setScreen("data")}>
-              <span className="nav-icon">🔒</span>Your data
-            </div>
-            {/* TA point 20 */}
-            <div className={`nav-item usage-nav ${screen==="usage"?"active":""}`} onClick={()=>setScreen("usage")}>
-              <span className="nav-icon">💰</span>Usage & cost
-              <span style={{marginLeft:"auto",fontSize:10,fontFamily:"var(--mono)",color:ai.budget.level==="ok"?"rgba(255,255,255,0.45)":"#ff6f61"}}>{usd(ai.budget.spent)}</span>
-            </div>
+            </>}
           </div>
 
-          {/* Nav — only when a subject is active */}
-          {activeSubject&&(
+          {/* Nav — only when a subject is active (hidden while User Management is open) */}
+          {activeSubject&&sideOpen==="subjects"&&(
             <div className="nav-group">
               <div className="nav-label">NAVIGATE</div>
               {nav.map(item=>(
                 <div key={item.id} className={`nav-item ${screen===item.id?"active":""}`}
-                  onClick={()=>{setScreen(item.id);setLearnMode(null);if(item.id!=="learn")setLearnId(null);if(item.id==="eval"){setEvalConceptId(null);}}}>
+                  onClick={()=>{setScreen(item.id);setLearnMode(null);setLearnId(null);if(item.id==="learn")setLearnReset(n=>n+1);if(item.id==="eval"){setEvalConceptId(null);}}}>
                   <span className="nav-icon">{item.icon}</span>{item.label}
                 </div>
               ))}
             </div>
           )}
 
+          {/* User Management: Usage & cost (TA point 20) and Your data (TA point 18) */}
+          <div className="nav-group">
+            <div className={`nav-item user-mgmt ${sideOpen==="user"?"active":""}`} onClick={()=>{setSideOpen("user");setScreen("data");}}>
+              <span className="nav-icon">👤</span>User Management
+              <span style={{marginLeft:"auto",fontSize:11}}>{sideOpen==="user"?"▾":"▸"}</span>
+            </div>
+            {sideOpen==="user"&&(
+              <div style={{paddingLeft:14}}>
+                <div className={`nav-item usage-nav ${screen==="usage"?"active":""}`} onClick={()=>setScreen("usage")}>
+                  <span className="nav-icon">💰</span>Usage & cost
+                  <span style={{marginLeft:"auto",fontSize:10,fontFamily:"var(--mono)",color:ai.budget.level==="ok"?"rgba(255,255,255,0.45)":"#ff6f61"}}>{usd(ai.budget.spent)}</span>
+                </div>
+                <div className={`nav-item data-nav ${screen==="data"?"active":""}`} onClick={()=>setScreen("data")}>
+                  <span className="nav-icon">🔒</span>Your data
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Storage — just above the footer line */}
+          <div style={{marginTop:"auto"}}><StorageBar/></div>
+
           {/* Footer */}
-          <div className="sidebar-footer">
+          <div className="sidebar-footer" style={{marginTop:0}}>
             {activeSubject?(
               <>
                 <div className="pbar-top">
@@ -282,16 +299,16 @@ const App = () => {
               ⚠ Could not save — browser storage is full. Your latest changes will be lost if you reload or close this page. Delete a subject you no longer need to free space.
             </div>
           )}
-          <AiBanner onOpenUsage={()=>setScreen("usage")}/>
+          <AiBanner onOpenUsage={()=>{setSideOpen("user");setScreen("usage");}}/>
           <div className="content">
             {screen==="usage"&&<UsageScreen/>}
-            {screen==="data"&&<DataScreen subjects={subjects} onDeleted={()=>{ setSubjects({}); setActiveSubjectId(null); setScreen("home"); setConsented(false); }}/>}
+            {screen==="data"&&<DataScreen subjects={subjects} onDeleted={()=>{ setSubjects({}); setActiveSubjectId(null); setScreen("home"); setSideOpen("subjects"); setConsented(false); }}/>}
             {screen==="home"&&<SubjectsHome subjects={subjects} onSelect={selectSubject} onCreate={()=>setShowNewSubject(true)} onImport={importShared}/>}
             {screen==="dashboard"&&activeSubject&&<Dashboard subject={activeSubject} onNavigate={navigate} onUpdate={updateSubject}/>}
             {screen==="upload"&&activeSubject&&<UploadScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey}/>}
             {screen==="library"&&activeSubject&&<LibraryScreen subject={activeSubject}/>}
             {screen==="graph"&&activeSubject&&<GraphScreen subject={activeSubject} onSelect={id=>navigate("learn",id)} onUpdate={updateSubject} apiKey={apiKey}/>}
-            {screen==="learn"&&activeSubject&&<LearnScreen key={`${learnId}|${learnMode||""}`} subject={activeSubject} onUpdate={updateSubject} initialId={learnId} initialMode={learnMode} apiKey={apiKey} onGoToEval={(cId)=>{setEvalConceptId(cId);setScreen("eval");}}/>}
+            {screen==="learn"&&activeSubject&&<LearnScreen key={`${learnId}|${learnMode||""}|${learnReset}`} subject={activeSubject} onUpdate={updateSubject} initialId={learnId} initialMode={learnMode} apiKey={apiKey} onGoToEval={(cId)=>{setEvalConceptId(cId);setScreen("eval");}}/>}
             {screen==="eval"&&activeSubject&&<EvalScreen subject={activeSubject} onUpdate={updateSubject} apiKey={apiKey} initialConceptId={evalConceptId} onClearConcept={()=>setEvalConceptId(null)}/>}
           </div>
         </div>
