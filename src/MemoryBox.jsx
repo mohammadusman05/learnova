@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { getMemory, studyHistory, removeQuestion, removeMistake, clearChat, memorySummary, RECURRING, FIX_AFTER } from './learnerMemory.js';
-import { isPersonalised, setPersonalised } from './personalise.js';
+import { getStudyMode, setStudyMode, modeSince, MODES } from './studyMode.js';
 
 // ============================================================
 // TA points 14–15 — "What Learnova remembers" box and the earlier conversation, shown on each concept
@@ -181,14 +181,48 @@ export const ChatNoted = ({ noted }) => !noted ? null : (
 // TA point 16 — personalisation pieces
 // ============================================================
 // On/off switch (per subject). Off = the tutor treats every learner the same (for adaptive vs non-adaptive comparisons).
-export const PersonalisationSwitch = ({ subject, onChange }) => {
-  const on = isPersonalised(subject);
+// TA point 21: which study mode this subject is in — a small tag on the Study and Evaluation screens
+// (the switch itself is on the subject's Dashboard)
+export const StudyModeTag = ({ subject }) => {
+  const mode = getStudyMode(subject), m = MODES[mode];
   return (
-    <button className="btn btn-secondary btn-xs personalisation-switch" title={on ? "The tutor uses what it remembers about you. Turn off to compare with a non-personalised tutor." : "The tutor treats every learner the same. Turn on to use what it remembers about you."}
-      onClick={() => onChange && onChange(setPersonalised(subject, !on))}
-      style={{ borderColor: on ? "#c4b5fd" : "var(--b1)", color: on ? "#7c3aed" : "var(--t3)", background: on ? "#faf8ff" : "var(--s3)" }}>
-      🎯 Personalisation: <b>{on ? "ON" : "OFF"}</b>
+    <span className={`study-mode-tag mode-${mode}`} title={`${m.text} Change it on the subject's Dashboard.`}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
+        border: `1px solid ${mode === "adaptive" ? "#c4b5fd" : "#cbd5e1"}`, color: mode === "adaptive" ? "#7c3aed" : "#475569", background: mode === "adaptive" ? "#faf8ff" : "#f8fafc" }}>
+      {m.icon} {m.label} mode
+    </span>
+  );
+};
+
+// TA point 21: the switch, on the subject's Dashboard — every learner can change it; each change asks first and is logged
+export const StudyModeCard = ({ subject, onChange }) => {
+  const mode = getStudyMode(subject);
+  const [ask, setAsk] = useState(null);
+  const since = modeSince(subject);
+  const fmt = (t) => new Date(t).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  const seg = (k) => (
+    <button key={k} className={`btn btn-sm mode-option mode-${k}`} onClick={() => k !== mode && setAsk(k)}
+      style={{ flex: 1, justifyContent: "center", border: `1.5px solid ${k === mode ? (k === "adaptive" ? "#7c3aed" : "#475569") : "var(--b1)"}`,
+        background: k === mode ? (k === "adaptive" ? "#faf8ff" : "#f8fafc") : "#fff", color: k === mode ? (k === "adaptive" ? "#7c3aed" : "#334155") : "var(--t3)", fontWeight: k === mode ? 800 : 500 }}>
+      {MODES[k].icon} {MODES[k].label}{k === mode ? " ✓" : ""}
     </button>
+  );
+  return (
+    <div className="card study-mode-card">
+      <div className="card-label">STUDY MODE</div>
+      <div className="f g8" style={{ marginTop: 8 }}>{seg("adaptive")}{seg("static")}</div>
+      <div className="txs t3" style={{ marginTop: 10, lineHeight: 1.7 }}>{MODES[mode].text}</div>
+      {since && <div className="txs t4 tm mode-since" style={{ marginTop: 6 }}>{MODES[mode].label} since {fmt(since)}</div>}
+      {ask && (
+        <div className="mode-confirm" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fde68a" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 8 }}>Switch “{subject.name}” to {MODES[ask].label} mode?</div>
+          <div className="f g8">
+            <button className="btn btn-primary btn-sm confirm-mode" onClick={() => { onChange && onChange(setStudyMode(subject, ask)); setAsk(null); }}>Yes, switch</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setAsk(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

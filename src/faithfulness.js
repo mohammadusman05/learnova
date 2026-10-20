@@ -8,6 +8,7 @@
 // ============================================================
 import { exJSON } from './utils.js';
 import { LECTURE_GUARD, currentLearnerCode } from './privacy.js';
+import { getStudyMode } from './studyMode.js';
 
 const oneLine = (s, n = 400) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 const MAX_LOG = 300;
@@ -177,7 +178,7 @@ export const checkAnswerKeys = async (callClaude, questions, passages) => {
 };
 
 // ── 3. the faithfulness log (evidence for the report) ──
-export const logFaith = (subject, entry) => ({ ...subject, faithLog: [...(subject.faithLog || []), { at: Date.now(), ...entry }].slice(-MAX_LOG) });
+export const logFaith = (subject, entry) => ({ ...subject, faithLog: [...(subject.faithLog || []), { at: Date.now(), studyMode: getStudyMode(subject), ...entry }].slice(-MAX_LOG) });
 export const faithSummary = (subject) => {
   const log = (subject.faithLog || []).filter(e => e.kind !== "quiz-keys" && e.score !== null && e.score !== undefined);
   const keys = (subject.faithLog || []).filter(e => e.kind === "quiz-keys");
@@ -186,14 +187,14 @@ export const faithSummary = (subject) => {
     quizzes: keys.length, corrected: keys.reduce((a, e) => a + (e.corrected || 0), 0), removed: keys.reduce((a, e) => a + (e.removed || 0), 0),
   };
 };
-const FAITH_COLUMNS = ["subject", "learner_code", "date_time", "concept", "kind", "statements_checked", "supported", "not_supported", "beyond_lecture", "groundedness_pct", "unsupported_statements", "questions_checked", "keys_corrected", "questions_removed"];
+const FAITH_COLUMNS = ["subject", "learner_code", "date_time", "concept", "kind", "statements_checked", "supported", "not_supported", "beyond_lecture", "groundedness_pct", "unsupported_statements", "questions_checked", "keys_corrected", "questions_removed", "study_mode"];
 const csvCell = (v) => { const s = v === undefined || v === null ? "" : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 export const faithCsv = (subject, learnerCode = currentLearnerCode()) => {
   const nodes = subject.graph?.nodes || {};
   const rows = (subject.faithLog || []).map(e => [
     subject.name, learnerCode, e.at ? new Date(e.at).toISOString() : "", nodes[e.conceptId]?.name || e.conceptId || "", e.kind,
     e.checked ?? "", e.supported ?? "", e.notSupported ?? "", e.beyond ?? "", e.score ?? "", (e.unsupported || []).join(" | "),
-    e.questionsChecked ?? "", e.corrected ?? "", e.removed ?? "",
+    e.questionsChecked ?? "", e.corrected ?? "", e.removed ?? "", e.studyMode ?? "",
   ]);
   return [FAITH_COLUMNS, ...rows].map(r => r.map(csvCell).join(",")).join("\r\n");
 };

@@ -3,7 +3,8 @@ import { ME, exJSON, graphEngine, MASTERY_THRESHOLD, applyAnswers } from './util
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck, autoGroup, remapNoted, groupMistakes, applyGrouping } from './learnerMemory.js';
-import { MemoryBox, EarlierChat, NotedLine, ChatNoted, PersonalisationSwitch, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
+import { MemoryBox, EarlierChat, NotedLine, ChatNoted, StudyModeTag, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
+import { isStatic } from './studyMode.js';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
 import { LECTURE_GUARD } from './privacy.js';
 import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerSystem, filterToLecture } from './faithfulness.js';
@@ -54,8 +55,9 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
   const commit=(updated)=>{ subjRef.current=updated; onUpdate(updated); };
   const bottomRef=useRef();
   const msgContainerRef=useRef();
-  const ready=graphEngine.getReadyConcepts(graph,mastery);
-  const due=dueList(subject); // point 17
+  const stat=isStatic(subject);  // TA point 21: Static mode — same for every learner, no suggestions or reminders
+  const ready=stat?[]:graphEngine.getReadyConcepts(graph,mastery);
+  const due=dueList(subject); // point 17 (always empty in Static mode)
   const all=Object.values(graph.nodes);
 
   // TA point 20: one shared caller — counts tokens, respects the budget, retries when busy, shows Claude's real error
@@ -359,7 +361,7 @@ Give a clear explanation with a practical real-world example.`,
       const {mastery:nw, steps}=applyAnswers(old, quiz.map((q,i)=>({correct:sel[i]===q.correct, type:"mcq"})));
       const at=Date.now();
       const screen=revisionMode?"revision":"study";
-      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, picked:quiz[i].options?.[sel[i]], correct:s.correct, type:"mcq", screen, questionSource:quizUsedSource, personalised:quizPersonalised, targetedMistake:quiz[i].targetText||"", at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
+      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, picked:quiz[i].options?.[sel[i]], correct:s.correct, type:"mcq", screen, questionSource:quizUsedSource, personalised:quizPersonalised, studyMode:quizPersonalised?"adaptive":"static", targetedMistake:quiz[i].targetText||"", at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
       setQuizReview(quiz.map((q,i)=>({n:i+1,targetText:q.targetText,correct:sel[i]===q.correct})).filter(x=>x.targetText));
       const newMastery={...subject.mastery,[cId]:nw};
       const newGraph={...subject.graph,nodes:{...subject.graph.nodes,[cId]:{...subject.graph.nodes[cId],state:nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
@@ -437,10 +439,10 @@ Give a clear explanation with a practical real-world example.`,
           {/* IN PROGRESS + NOT STARTED */}
           <div className="f ac g12 mb8">
               <div className="card-label" style={{margin:0}}>ALL CONCEPTS</div>
-              <div style={{fontSize:11,color:"var(--t3)",fontFamily:"var(--mono)",padding:"3px 10px",background:"var(--s3)",borderRadius:20}}>every concept from your lectures</div>
+              <div style={{fontSize:11,color:"var(--t3)",fontFamily:"var(--mono)",padding:"3px 10px",background:"var(--s3)",borderRadius:20}}>{stat?"every concept, in course order — the same for every learner":"every concept from your lectures"}</div>
             </div>
           <div className="gauto mb24">
-            {all.filter(c=>(mastery[c.id]||0)<MASTERY_THRESHOLD).map(c=>{
+            {all.filter(c=>stat||(mastery[c.id]||0)<MASTERY_THRESHOLD).map(c=>{
               const {color,label,bg,border}=ME.getLevel(mastery[c.id]||0);
               return(
                 <div key={c.id} className="cc" onClick={()=>startLearning(c.id)}>
@@ -453,7 +455,7 @@ Give a clear explanation with a practical real-world example.`,
           </div>
 
           {/* COMPLETED SECTION — at bottom */}
-          {all.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).length>0&&(
+          {!stat&&all.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).length>0&&(
             <div className="mb24">
               <div className="f ac g12 mb8">
                 <div className="card-label" style={{margin:0,color:"#16a34a"}}>✅ COMPLETED</div>
@@ -499,7 +501,7 @@ Give a clear explanation with a practical real-world example.`,
           </div>}
         </div>
         <div className="f ac g8">
-          <PersonalisationSwitch subject={subject} onChange={commit}/>
+          <StudyModeTag subject={subject}/>
           <div style={{padding:"6px 14px",borderRadius:20,background:"var(--s3)",border:"1px solid var(--b1)"}}>
             <div className="txs tm" style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{ME.getLevel(subject.mastery[cId]||0).label}</div>
           </div>
@@ -508,8 +510,8 @@ Give a clear explanation with a practical real-world example.`,
       {phase==="explain"&&(
         <div style={{maxWidth:"100%"}}>
           {/* TA point 14: what Learnova remembers about this learner on this concept */}
-          <MemoryBox subject={subject} cId={cId} onChange={commit} onGroup={groupNow}/>
-          <EarlierChat subject={subject} cId={cId} since={sessionStart} onChange={commit}/>
+          {!stat&&<MemoryBox subject={subject} cId={cId} onChange={commit} onGroup={groupNow}/>}
+          {!stat&&<EarlierChat subject={subject} cId={cId} since={sessionStart} onChange={commit}/>}
           {/* Source selector — shown before generating */}
           {!sourcesReady&&(
             <div className="card mb20" style={{background:"linear-gradient(135deg,#fff9f8,#f8fafc)"}}>
@@ -645,7 +647,7 @@ Give a clear explanation with a practical real-world example.`,
                   <div style={{fontSize:9,letterSpacing:"2px",color:"var(--t4)",fontFamily:"var(--mono)",marginBottom:6,fontWeight:700}}>🤖 AI TUTOR</div>
                   <div style={{whiteSpace:"pre-wrap"}}>{m.content}</div>
                   <SourcesList sources={m.sources}/>
-                  <ChatNoted noted={m.noted}/>
+                  {!stat&&<ChatNoted noted={m.noted}/>}
                   <FaithBadge check={m.check}/>
                 </div>
               </div>
@@ -700,8 +702,8 @@ Give a clear explanation with a practical real-world example.`,
           <div className="ts t3 mb24 tm">Updated mastery: <span style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{subject.mastery[cId]||0}%</span>{" · "}{(subject.mastery[cId]||0)>=MASTERY_THRESHOLD?"Concept Mastered ✓":"Needs more practice"}</div>
           {revisionResult&&<div className="revision-result ts" style={{color:"#0369a1",fontWeight:700,marginTop:-12,marginBottom:8}}>{revisionResult}</div>}
           <div className="next-revision txs t3 tm">{nextRevisionLabel(subject,cId)}</div>
-          <NotedLine noted={noted}/>
-          <TargetedReview items={quizReview}/>
+          {!stat&&<NotedLine noted={noted}/>}
+          {!stat&&<TargetedReview items={quizReview}/>}
           <div className="mb24"/>
           <div className="f g12 jc">
             <button className="btn btn-secondary" onClick={()=>setPhase("explain")}>Review Lesson</button>

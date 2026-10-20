@@ -2,21 +2,25 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, graphEngine, MASTERY_THRESHOLD } from './utils.js';
 import Ring from './Ring.jsx';
 import { dueList } from './revision.js';
+import { isStatic } from './studyMode.js';
+import { StudyModeCard } from './MemoryBox.jsx';
 const Dashboard = ({ subject, onNavigate, onUpdate }) => {
   const {graph,mastery}=subject;
   const concepts=Object.values(graph.nodes);
   const total=concepts.length;
   const mastered=concepts.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).length;
   const avg=total?Math.round(concepts.reduce((s,c)=>s+(mastery[c.id]||0),0)/total):0;
-  const ready=graphEngine.getReadyConcepts(graph,mastery);
-  const weak=concepts.filter(c=>(mastery[c.id]||0)>0&&(mastery[c.id]||0)<MASTERY_THRESHOLD).sort((a,b)=>mastery[a.id]-mastery[b.id]);
+  const stat=isStatic(subject); // TA point 21: no suggestions or reminders in Static mode
+  const ready=stat?[]:graphEngine.getReadyConcepts(graph,mastery);
+  const weak=stat?[]:concepts.filter(c=>(mastery[c.id]||0)>0&&(mastery[c.id]||0)<MASTERY_THRESHOLD).sort((a,b)=>mastery[a.id]-mastery[b.id]);
   const order=graphEngine.getTopoOrder(graph);
   const due=dueList(subject); // TA point 17
   const stats=[
     {label:"TOTAL CONCEPTS",value:total,sub:"in knowledge graph",color:"#ff6f61"},
     {label:"MASTERED",value:mastered,sub:`≥ ${MASTERY_THRESHOLD}% mastery`,color:"#16a34a"},
     {label:"AVG MASTERY",value:`${avg}%`,sub:"across all concepts",color:"#263238"},
-    {label:"READY TO LEARN",value:ready.length,sub:"prerequisites cleared",color:"#e8503f"},
+    stat?{label:"STUDY MODE",value:"Static",sub:"the same for every learner",color:"#475569"}
+        :{label:"READY TO LEARN",value:ready.length,sub:"prerequisites cleared",color:"#e8503f"},
   ];
   return (
     <div className="fade">
@@ -52,8 +56,10 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
           })}
         </div>
         <div className="f fc g16">
+          {/* TA point 21: Adaptive / Static switch */}
+          <StudyModeCard subject={subject} onChange={onUpdate}/>
           {/* TA point 17: concepts due for revision */}
-          <div className="card due-card">
+          {!stat&&<div className="card due-card">
             <div className="card-label" style={{color:"#0369a1"}}>📅 DUE FOR REVISION{due.length?` · ${due.length}`:""}</div>
             {due.length===0
               ? <div className="ts t3 tm">Nothing due — concepts come back here after 1, 3, 7, 14 and 30 days, or sooner if you make a mistake.</div>
@@ -67,8 +73,8 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
                   <div className="tag" style={{background:"#e0f2fe",color:"#0369a1",borderColor:"#7dd3fc",fontSize:9,flexShrink:0}}>REVISE →</div>
                 </div>
               ))}
-          </div>
-          <div className="card" style={{flex:1}}>
+          </div>}
+          {!stat&&<div className="card" style={{flex:1}}>
             <div className="card-label">⚡ READY TO LEARN</div>
             {ready.length===0
               ? <div className="ts t3 tm">{total===0?"Upload a lecture to get started.":"All concepts completed! 🎉"}</div>
@@ -86,7 +92,7 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
                 </div>
               ))
             }
-          </div>
+          </div>}
           {weak.length>0&&(
             <div className="card" style={{flex:1}}>
               <div className="card-label">⚠️ NEEDS REVIEW</div>

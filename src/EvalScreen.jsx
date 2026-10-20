@@ -3,7 +3,8 @@ import { ME, exJSON, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt } from './retrieval.js';
 import { getMemory, analyseAnswers, applyAnalysis, autoGroup, remapNoted } from './learnerMemory.js';
-import { NotedLine, PersonalisationSwitch, TargetTag } from './MemoryBox.jsx';
+import { NotedLine, StudyModeTag, TargetTag } from './MemoryBox.jsx';
+import { isStatic } from './studyMode.js';
 import { isPersonalised, targetBlock, resolveTargets } from './personalise.js';
 import { scheduleAfterQuiz } from './revision.js';
 import { LECTURE_GUARD } from './privacy.js';
@@ -279,7 +280,7 @@ ${JSON.stringify(gradingInput)}`
     const old = subject.mastery[selectedConcept] || 0;
     const { mastery: nw, steps } = applyAnswers(old, graded.map(r => ({ correct: !!r.isCorrect, type: r.type === "desc" ? "desc" : "mcq" })));
     const at = Date.now();
-    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, picked: graded[i].userAnswer, correct: s.correct, type: s.type, screen: "evaluation", questionSource: usedSource, personalised: usedPersonalised, targetedMistake: graded[i].targetText || "", at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
+    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, picked: graded[i].userAnswer, correct: s.correct, type: s.type, screen: "evaluation", questionSource: usedSource, personalised: usedPersonalised, studyMode: usedPersonalised ? "adaptive" : "static", targetedMistake: graded[i].targetText || "", at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
     const newMastery = {...subject.mastery, [selectedConcept]: nw};
     const newGraph = {...subject.graph, nodes:{...subject.graph.nodes,[selectedConcept]:{...subject.graph.nodes[selectedConcept],state: nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
 
@@ -411,7 +412,7 @@ ${JSON.stringify(gradingInput)}`
               <div className="mb16">
                 <div className="f ac jb mb8" style={{gap:8,flexWrap:"wrap"}}>
                   <div className="txs t3 tm">Personalised questions aim at your open mistakes.</div>
-                  <PersonalisationSwitch subject={subject} onChange={commit}/>
+                  <StudyModeTag subject={subject}/>
                 </div>
                 <div className="card-label">QUESTION SOURCE</div>
                 <div className="f g8">
@@ -599,7 +600,7 @@ ${JSON.stringify(gradingInput)}`
                 : <div style={{fontSize:13,color:"#16a34a",fontFamily:"var(--mono)"}}>Passed — mastery now {subject.mastery[selectedConcept]||0}%. Keep practising to reach {MASTERY_THRESHOLD}% (Mastered).</div>)
             : <div style={{fontSize:13,color:"#dc2626",fontFamily:"var(--mono)"}}>Score 75% or above to pass. Review the topic and retake.</div>
           }
-          <NotedLine noted={noted}/>
+          {!isStatic(subject)&&<NotedLine noted={noted}/>}
         </div>
 
         {/* Action buttons */}

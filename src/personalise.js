@@ -8,15 +8,16 @@
 // With personalisation off, or with nothing remembered yet, everything works exactly as before.
 // ============================================================
 import { exJSON } from './utils.js';
+import { getStudyMode, setStudyMode } from './studyMode.js';
 import { LECTURE_GUARD } from './privacy.js';
 import { getMemory, openMistakes, memorySummary } from './learnerMemory.js';
 import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 
 const oneLine = (s, n = 300) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 
-// ── 5. on/off (default on), saved in the subject ──
-export const isPersonalised = (subject) => subject?.personalise !== false;
-export const setPersonalised = (subject, on) => ({ ...subject, personalise: !!on });
+// ── 5. on/off — since point 21 this follows the subject's study mode (Adaptive = on, Static = off) ──
+export const isPersonalised = (subject) => getStudyMode(subject) === "adaptive";
+export const setPersonalised = (subject, on) => setStudyMode(subject, on ? "adaptive" : "static");
 
 // ── 1 + 2. "For you" note and quick recap of weak prerequisites ──
 export const PERSONAL_NOTE_PROMPT = `You are a tutor writing a short personal note for ONE learner, shown before the main explanation of a concept.
