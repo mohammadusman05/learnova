@@ -10,7 +10,7 @@
 // ============================================================
 import { getMemory, studyHistory } from './learnerMemory.js';
 import { isPersonalised } from './personalise.js';
-import { isStatic } from './studyMode.js';
+import { isAdaptive } from './studyMode.js';
 
 export const DAY = 24 * 60 * 60 * 1000;
 export const INTERVALS = [1, 3, 7, 14, 30];        // days
@@ -62,7 +62,7 @@ export const revisionStatus = (subject, cId, now = Date.now()) => {
 };
 
 /** Concepts due now, most urgent first: most overdue, then most open mistakes, then lowest mastery. */
-export const dueList = (subject, now = Date.now()) => isStatic(subject) ? [] : Object.keys(subject?.graph?.nodes || {})
+export const dueList = (subject, now = Date.now()) => !isAdaptive(subject) ? [] : Object.keys(subject?.graph?.nodes || {})
   .map(id => ({ id, name: subject.graph.nodes[id].name, mastery: subject.mastery?.[id] || 0, st: revisionStatus(subject, id, now) }))
   .filter(x => x.st && x.st.due <= now)
   .map(x => ({ ...x, overdueDays: days(now - x.st.due), reasons: x.st.reasons.map(r => r.text) }))
@@ -70,7 +70,7 @@ export const dueList = (subject, now = Date.now()) => isStatic(subject) ? [] : O
 
 /** "Next revision: 23 Oct (in 3 days)" — or "due now" — or "" when the concept is not scheduled yet */
 export const nextRevisionLabel = (subject, cId, now = Date.now()) => {
-  if (isStatic(subject)) return "";   // point 21: no revision reminders in Static mode (the schedule is still recorded)
+  if (!isAdaptive(subject)) return "";   // point 21: no revision reminders in Static mode (the schedule is still recorded)
   const st = revisionStatus(subject, cId, now);
   if (!st) return "";
   if (st.due <= now) return "Revision due now";

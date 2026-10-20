@@ -4,7 +4,7 @@ import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt } from './retrieval.js';
 import { getMemory, analyseAnswers, applyAnalysis, autoGroup, remapNoted } from './learnerMemory.js';
 import { NotedLine, StudyModeTag, TargetTag } from './MemoryBox.jsx';
-import { isStatic } from './studyMode.js';
+import { isAdaptive } from './studyMode.js';
 import { isPersonalised, targetBlock, resolveTargets } from './personalise.js';
 import { scheduleAfterQuiz } from './revision.js';
 import { LECTURE_GUARD } from './privacy.js';
@@ -600,7 +600,7 @@ ${JSON.stringify(gradingInput)}`
                 : <div style={{fontSize:13,color:"#16a34a",fontFamily:"var(--mono)"}}>Passed — mastery now {subject.mastery[selectedConcept]||0}%. Keep practising to reach {MASTERY_THRESHOLD}% (Mastered).</div>)
             : <div style={{fontSize:13,color:"#dc2626",fontFamily:"var(--mono)"}}>Score 75% or above to pass. Review the topic and retake.</div>
           }
-          {!isStatic(subject)&&<NotedLine noted={noted}/>}
+          {isAdaptive(subject)&&<NotedLine noted={noted}/>}
         </div>
 
         {/* Action buttons */}

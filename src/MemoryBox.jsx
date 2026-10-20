@@ -194,6 +194,8 @@ export const StudyModeTag = ({ subject }) => {
   );
 };
 
+const MODE_COLOR = { adaptive: "#7c3aed", static: "#334155", plain: "#0f766e" };
+const MODE_BG = { adaptive: "#faf8ff", static: "#f8fafc", plain: "#f0fdfa" };
 // TA point 21: the switch, on the subject's Dashboard — every learner can change it; each change asks first and is logged
 export const StudyModeCard = ({ subject, onChange }) => {
   const mode = getStudyMode(subject);
@@ -202,15 +204,15 @@ export const StudyModeCard = ({ subject, onChange }) => {
   const fmt = (t) => new Date(t).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
   const seg = (k) => (
     <button key={k} className={`btn btn-sm mode-option mode-${k}`} onClick={() => k !== mode && setAsk(k)}
-      style={{ flex: 1, justifyContent: "center", border: `1.5px solid ${k === mode ? (k === "adaptive" ? "#7c3aed" : "#475569") : "var(--b1)"}`,
-        background: k === mode ? (k === "adaptive" ? "#faf8ff" : "#f8fafc") : "#fff", color: k === mode ? (k === "adaptive" ? "#7c3aed" : "#334155") : "var(--t3)", fontWeight: k === mode ? 800 : 500 }}>
+      style={{ flex: "1 1 auto", justifyContent: "center", whiteSpace: "nowrap", border: `1.5px solid ${k === mode ? MODE_COLOR[k] : "var(--b1)"}`,
+        background: k === mode ? MODE_BG[k] : "#fff", color: k === mode ? MODE_COLOR[k] : "var(--t3)", fontWeight: k === mode ? 800 : 500 }}>
       {MODES[k].icon} {MODES[k].label}{k === mode ? " ✓" : ""}
     </button>
   );
   return (
     <div className="card study-mode-card">
       <div className="card-label">STUDY MODE</div>
-      <div className="f g8" style={{ marginTop: 8 }}>{seg("adaptive")}{seg("static")}</div>
+      <div className="f g8" style={{ marginTop: 8, flexWrap: "wrap" }}>{seg("adaptive")}{seg("static")}{seg("plain")}</div>
       <div className="txs t3" style={{ marginTop: 10, lineHeight: 1.7 }}>{MODES[mode].text}</div>
       {since && <div className="txs t4 tm mode-since" style={{ marginTop: 6 }}>{MODES[mode].label} since {fmt(since)}</div>}
       {ask && (

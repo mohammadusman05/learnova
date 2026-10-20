@@ -5,19 +5,24 @@
 //   Static:             every learner gets the same — same order, same kind of questions, no reminders or
 //                       suggestions. Answers, mastery and mistakes are STILL recorded (for the comparison),
 //                       just not used. Mastery % stays visible.
+//   Plain AI chat (point 22): a ChatGPT-like chat with the lectures attached — none of Learnova's own features
+//                       (no topics, explanations, quizzes, mastery or memory). Every question is recorded.
 // One setting per subject; every learner can switch it; every switch is logged and every answer / lecture
-// check records the mode it was given in (study_mode column).
+// check / chat message records the mode it was given in (study_mode column).
 // ============================================================
 export const MODES = {
   adaptive: { label: "Adaptive", icon: "🎯", text: "Learnova adapts to you: quick recaps, personal notes, a tutor that remembers your mistakes, questions aimed at them, revision reminders and suggestions on what to learn next." },
   static: { label: "Static", icon: "📘", text: "Everyone gets the same: topics in course order, general questions, no personal notes, reminders or suggestions. Learnova still records your answers and mastery." },
+  plain: { label: "Plain AI chat", icon: "💬", text: "A plain AI chatbot with your lectures attached — like ChatGPT. No topics, explanations, quizzes, mastery or personal features. Your questions are recorded." },
 };
 
 /** "adaptive" | "static" — a subject whose Personalisation was switched OFF before (point 16) counts as static */
-export const getStudyMode = (subject) => subject?.studyMode === "static" || subject?.studyMode === "adaptive"
+export const getStudyMode = (subject) => MODES[subject?.studyMode]
   ? subject.studyMode
   : (subject?.personalise === false ? "static" : "adaptive");
 export const isStatic = (subject) => getStudyMode(subject) === "static";
+export const isPlain = (subject) => getStudyMode(subject) === "plain";
+export const isAdaptive = (subject) => getStudyMode(subject) === "adaptive";
 
 export const setStudyMode = (subject, mode, now = Date.now()) => {
   if (!MODES[mode]) throw new Error(`Unknown study mode: ${mode}`);

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, MASTERY_THRESHOLD, answerLogCsv } from './utils.js';
 import { faithCsv, faithSummary } from './faithfulness.js';
 import { exportSubject, shareFileName } from './subjectShare.js';
+import { plainChatCsv, chatSummary } from './plainChat.js';
 const LibraryScreen = ({ subject }) => {
   const docs = subject.docs || [];
   const answerCount = (subject.answerLog || []).length;
@@ -25,6 +26,18 @@ const LibraryScreen = ({ subject }) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = shareFileName(subject);
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  // TA point 22: what the learner asked in Plain AI chat mode
+  const cs = chatSummary(subject);
+  const downloadChatLog = () => {
+    const blob = new Blob(["\uFEFF" + plainChatCsv(subject)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = (subject.name || "subject").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const d = new Date();
+    a.href = url; a.download = `learnova-plain-chat-${slug}-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -178,6 +191,17 @@ const LibraryScreen = ({ subject }) => {
           <button className="btn btn-secondary btn-sm download-faith" onClick={downloadFaith} disabled={!(subject.faithLog||[]).length}>⬇ Faithfulness CSV</button>
         </div>
       </div>
+      {cs.questions > 0 && (
+        <div className="card mt16 plain-chat-card">
+          <div className="f ac jb" style={{gap:12,flexWrap:"wrap"}}>
+            <div>
+              <div className="card-label" style={{margin:0}}>PLAIN AI CHAT LOG</div>
+              <div className="txs t3 tm" style={{marginTop:4}}>{cs.chats} chat{cs.chats!==1?"s":""} · {cs.questions} question{cs.questions!==1?"s":""} · about {cs.minutes} minute{cs.minutes!==1?"s":""} — one row per question, with the answer and timings</div>
+            </div>
+            <button className="btn btn-secondary btn-sm download-plain-chat" onClick={downloadChatLog}>⬇ Chat log (CSV)</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

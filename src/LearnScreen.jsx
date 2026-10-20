@@ -4,7 +4,7 @@ import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck, autoGroup, remapNoted, groupMistakes, applyGrouping } from './learnerMemory.js';
 import { MemoryBox, EarlierChat, NotedLine, ChatNoted, StudyModeTag, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
-import { isStatic } from './studyMode.js';
+import { isAdaptive } from './studyMode.js';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
 import { LECTURE_GUARD } from './privacy.js';
 import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerSystem, filterToLecture } from './faithfulness.js';
@@ -55,7 +55,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
   const commit=(updated)=>{ subjRef.current=updated; onUpdate(updated); };
   const bottomRef=useRef();
   const msgContainerRef=useRef();
-  const stat=isStatic(subject);  // TA point 21: Static mode — same for every learner, no suggestions or reminders
+  const stat=!isAdaptive(subject);  // TA point 21: Static mode — same for every learner, no suggestions or reminders
   const ready=stat?[]:graphEngine.getReadyConcepts(graph,mastery);
   const due=dueList(subject); // point 17 (always empty in Static mode)
   const all=Object.values(graph.nodes);

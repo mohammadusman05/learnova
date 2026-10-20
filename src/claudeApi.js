@@ -41,10 +41,11 @@ export const FEATURES = {
   "links-within":          { group: "Uploads & graph", label: "Prerequisite links inside a PDF" },
   "links-across":          { group: "Uploads & graph", label: "Prerequisite links across PDFs" },
   "links-check":           { group: "Uploads & graph", label: "Checking prerequisite links" },
+  "plain-chat":            { group: "Plain AI chat", label: "Plain AI chat messages (point 22)" },
   "key-test":              { group: "Other", label: "Checking the API key at login" },
   "other":                 { group: "Other", label: "Other" },
 };
-export const GROUPS = ["Explanations", "Chat", "Quizzes & evaluation", "Lecture checks", "Learner memory", "Uploads & graph", "Other"];
+export const GROUPS = ["Explanations", "Chat", "Quizzes & evaluation", "Lecture checks", "Learner memory", "Uploads & graph", "Plain AI chat", "Other"];
 // The first words of each system prompt tell what the call is for (prompts are shared with the offline tools)
 const PROMPT_STARTS = [
   ["You are an AI tutor. Explain using ONLY", "explain-lecture"],

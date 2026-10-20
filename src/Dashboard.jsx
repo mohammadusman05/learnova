@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ME, graphEngine, MASTERY_THRESHOLD } from './utils.js';
 import Ring from './Ring.jsx';
 import { dueList } from './revision.js';
-import { isStatic } from './studyMode.js';
+import { isStatic, isPlain } from './studyMode.js';
+import { chatSummary, buildAttachment } from './plainChat.js';
 import { StudyModeCard } from './MemoryBox.jsx';
 const Dashboard = ({ subject, onNavigate, onUpdate }) => {
   const {graph,mastery}=subject;
@@ -22,6 +23,29 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
     stat?{label:"STUDY MODE",value:"Static",sub:"the same for every learner",color:"#475569"}
         :{label:"READY TO LEARN",value:ready.length,sub:"prerequisites cleared",color:"#e8503f"},
   ];
+  // TA point 22: Plain AI chat mode — no topics or mastery, just the chat and the mode switch
+  if(isPlain(subject)){
+    const cs=chatSummary(subject), att=buildAttachment(subject);
+    return (
+      <div className="fade">
+        <div className="section-title">{subject.emoji} {subject.name}</div>
+        <div className="section-sub">Plain AI chat — a normal chatbot with your lectures attached</div>
+        <div className="g2 mb24">
+          <div className="card plain-summary">
+            <div className="card-label">💬 YOUR AI CHAT</div>
+            <div className="f g16 mb12" style={{marginTop:8,flexWrap:"wrap"}}>
+              {[["CHATS",cs.chats],["QUESTIONS ASKED",cs.questions],["MINUTES CHATTING",cs.minutes]].map(([l,v])=>(
+                <div key={l}><div style={{fontSize:26,fontWeight:800,color:"var(--t1)"}}>{v}</div><div className="txs t3 tm">{l}</div></div>
+              ))}
+            </div>
+            <div className="txs t3 mb12" style={{lineHeight:1.7}}>📎 Lectures attached: {att.attached.length?att.attached.join(", "):"none yet"}</div>
+            <button className="btn btn-primary btn-sm open-chat" onClick={()=>onNavigate("chat")}>Open AI Chat →</button>
+          </div>
+          <StudyModeCard subject={subject} onChange={onUpdate}/>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="fade">
       <div className="section-title">{subject.emoji} {subject.name}</div>
