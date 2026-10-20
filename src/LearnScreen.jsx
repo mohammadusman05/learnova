@@ -3,7 +3,8 @@ import { ME, exJSON, graphEngine, MASTERY_THRESHOLD, applyAnswers } from './util
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck } from './learnerMemory.js';
-import { MemoryBox, EarlierChat, NotedLine, ChatNoted } from './MemoryBox.jsx';
+import { MemoryBox, EarlierChat, NotedLine, ChatNoted, PersonalisationSwitch, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
+import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
 
 // TA point 11: list the lecture passages a reply actually cited, e.g. "[S1] L01.pdf, p.6"
 const citedSources = (passages, reply) => sourcesOf(passages).filter(s => (reply || "").includes(`[${s.tag}]`));
@@ -36,6 +37,8 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
   const [quizUsedSource,setQuizUsedSource]=useState("general");
   const [sessionStart,setSessionStart]=useState(Date.now()); // point 14: chat saved before this visit = "earlier conversation"
   const [noted,setNoted]=useState(null);                     // point 14: mistakes noted after a quiz
+  const [quizReview,setQuizReview]=useState([]);             // point 16: which quiz questions checked an earlier mix-up
+  const [quizPersonalised,setQuizPersonalised]=useState(false);
   const subjRef=useRef(subject); subjRef.current=subject;    // newest subject, for saves that finish after a Claude call
   const commit=(updated)=>{ subjRef.current=updated; onUpdate(updated); };
   const bottomRef=useRef();
@@ -116,7 +119,9 @@ const LearnScreen = ({ subject, onUpdate, initialId, apiKey, onGoToEval }) => {
       const wantDoc=sourceChoice.doc&&hasDocs;
       const wantKb=sourceChoice.kb||!wantDoc;   // "Document only" but no document → general knowledge, with a note
       const out=[];
-      if(sourceChoice.doc&&!hasDocs) out.push({role:"ai",content:"No uploaded document contains this concept, so this explanation uses general knowledge."});
+      // TA point 16: a personal note ("For you" + quick recap of weak prerequisites) is prepared alongside the explanation
+      const notePromise=personalNote(callClaude,subjRef.current,cId,{useLecture:wantDoc}).catch(e=>({error:e.message}));
+      if(sourceChoice.doc&&!hasDocs) out.push({role:"ai",note:true,content:"No uploaded document contains this concept, so this explanation uses general knowledge."});
       if(wantDoc){
         setMessages([...out,{role:"loading-doc",content:""}]);
         // RAG: find the best passages for this concept in ALL its documents (not just the first 8,000 characters)
@@ -150,7 +155,13 @@ Give a clear explanation with a practical real-world example.`,
         );
         out.push({role:"kb",content:kbReply});
       }
-      setMessages(out);
+      setMessages([{role:"loading-personal",content:""},...out]);
+      const note=await notePromise;
+      const personal=[];
+      if(note?.recap?.length) personal.push({role:"recap",items:note.recap,sources:note.recapSources});
+      if(note?.forYou?.length) personal.push({role:"foryou",items:note.forYou,covers:note.covers,sources:note.forYouSources});
+      if(note?.error) personal.push({role:"ai",note:true,content:`(Could not personalise this explanation: ${note.error})`});
+      setMessages([...personal,...out]);
     }catch(e){setMessages([{role:"ai",content:"Error: "+e.message}]);}
     setLoading(false);
   };
@@ -165,11 +176,14 @@ Give a clear explanation with a practical real-world example.`,
       const c=graph.nodes[cId];
       // TA point 11: answer from the lecture first (RAG), cite pages, label anything beyond the lecture
       const {passages}=c?await retrieve(subject,c,{question:userMsg,k:4,maxChars:4500}):{passages:[]};
+      // TA point 16: the conversation so far + (when personalisation is on) what is known about this learner
+      const ctx=chatContext(subjRef.current,cId,messages);
+      const head=(ctx.known?`What you know about this learner:\n${ctx.known}\n\n`:"")+(ctx.convo?`Conversation so far:\n${ctx.convo}\n\n`:"");
       const reply=await callClaude(
-        `You are an AI tutor for "${subject.name}", helping a learner with "${c?.name}". Answer from the lecture passages first and cite them like [S1]. If the passages do not cover the question (or part of it), you may answer from general knowledge, but put that part after a line that starts with "Beyond your lecture:". Be clear and concise.`,
-        passages.length
+        `You are an AI tutor for "${subject.name}", helping a learner with "${c?.name}". Answer from the lecture passages first and cite them like [S1]. If the passages do not cover the question (or part of it), you may answer from general knowledge, but put that part after a line that starts with "Beyond your lecture:". Be clear and concise.`+CHAT_PERSONAL_RULE,
+        head+(passages.length
           ? `Lecture passages:\n${passagesForPrompt(passages)}\n\nLearner's question: ${userMsg}`
-          : `No lecture passages match this question.\n\nLearner's question: ${userMsg}`,
+          : `No lecture passages match this question.\n\nLearner's question: ${userMsg}`),
         1000
       );
       const sources=citedSources(passages,reply);
@@ -185,7 +199,7 @@ Give a clear explanation with a practical real-world example.`,
   };
 
   // TA point 11: the learner chooses where quiz questions come from, then the quiz is generated
-  const startQuiz=()=>{ setPhase("quiz"); setQuiz(null); setQuizSetup(true); setNoted(null); };
+  const startQuiz=()=>{ setPhase("quiz"); setQuiz(null); setQuizSetup(true); setNoted(null); setQuizReview([]); };
 
   // TA points 14–15: after a quiz, name the wrong idea behind wrong answers, and let right answers fix open mistakes
   // (runs after the score is shown)
@@ -218,13 +232,15 @@ Give a clear explanation with a practical real-world example.`,
       const {passages}=await retrieve(subject,c,{k:5,maxChars:5000});
       if(passages.length) lecture=passagesForPrompt(passages); else source="general";
     }
+    // TA point 16: up to 2 of the 3 questions aim at the learner's open mistakes (when personalisation is on)
+    const tb=targetBlock(subjRef.current,cId,2,"mcq");
     const raw=await callClaude(
       `Generate 3 MCQ questions. Return ONLY JSON:\n{"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why correct"}]}`,
-      source==="lecture"
+      (source==="lecture"
         ? `Create 3 quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name}).\nEvery question must be about "${c?.name}" and answerable from these lecture passages only. Ignore any passage that is not about "${c?.name}".\n\n${lecture}`
-        : `Create 3 quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name})`
+        : `Create 3 quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name})`)+tb.text
     );
-    const parsed=exJSON(raw);setQuiz(parsed?.questions||[]);setQuizUsedSource(source);setLoading(false);
+    const parsed=exJSON(raw);setQuiz(resolveTargets(parsed?.questions||[],tb.targets));setQuizUsedSource(source);setQuizPersonalised(isPersonalised(subjRef.current));setLoading(false);
   };
 
   const QuizComp=()=>{
@@ -240,13 +256,14 @@ Give a clear explanation with a practical real-world example.`,
       const old=subject.mastery[cId]||0;
       const {mastery:nw, steps}=applyAnswers(old, quiz.map((q,i)=>({correct:sel[i]===q.correct, type:"mcq"})));
       const at=Date.now();
-      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, picked:quiz[i].options?.[sel[i]], correct:s.correct, type:"mcq", screen:"study", questionSource:quizUsedSource, at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
+      const log=steps.map((s,i)=>({conceptId:cId, question:quiz[i].q, picked:quiz[i].options?.[sel[i]], correct:s.correct, type:"mcq", screen:"study", questionSource:quizUsedSource, personalised:quizPersonalised, targetedMistake:quiz[i].targetText||"", at, masteryBefore:s.masteryBefore, masteryAfter:s.masteryAfter}));
+      setQuizReview(quiz.map((q,i)=>({n:i+1,targetText:q.targetText,correct:sel[i]===q.correct})).filter(x=>x.targetText));
       const newMastery={...subject.mastery,[cId]:nw};
       const newGraph={...subject.graph,nodes:{...subject.graph.nodes,[cId]:{...subject.graph.nodes[cId],state:nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
       commit({...subjRef.current,mastery:newMastery,graph:newGraph,answerLog:[...(subjRef.current.answerLog||[]),...log]});
       setTimeout(()=>setPhase("result"),900);
       // points 14–15: wrong answers → mistakes to remember; right answers → can fix open mistakes
-      const asItem=({q,i})=>({question:q.q, answer:q.options?.[sel[i]]||"", correct:q.options?.[q.correct]||"", explanation:q.explanation, screen:"study"});
+      const asItem=({q,i})=>({question:q.q, answer:q.options?.[sel[i]]||"", correct:q.options?.[q.correct]||"", explanation:q.explanation, screen:"study", targetId:q.targetId});
       const all=quiz.map((q,i)=>({q,i}));
       noteAnswers(all.filter(({q,i})=>sel[i]!==q.correct).map(asItem), all.filter(({q,i})=>sel[i]===q.correct).map(asItem), at);
     };
@@ -352,8 +369,11 @@ Give a clear explanation with a practical real-world example.`,
           <div className="section-title">{concept?.name}</div>
           <div className="section-sub">{concept?.definition}</div>
         </div>
-        <div style={{padding:"6px 14px",borderRadius:20,background:"var(--s3)",border:"1px solid var(--b1)"}}>
-          <div className="txs tm" style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{ME.getLevel(subject.mastery[cId]||0).label}</div>
+        <div className="f ac g8">
+          <PersonalisationSwitch subject={subject} onChange={commit}/>
+          <div style={{padding:"6px 14px",borderRadius:20,background:"var(--s3)",border:"1px solid var(--b1)"}}>
+            <div className="txs tm" style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{ME.getLevel(subject.mastery[cId]||0).label}</div>
+          </div>
         </div>
       </div>
       {phase==="explain"&&(
@@ -424,6 +444,12 @@ Give a clear explanation with a practical real-world example.`,
             if(m.role==="loading-kb") return (
               <div key={i} className="loading fade"><div className="spin"/><span>Generating knowledge base answer...</span></div>
             );
+            // TA point 16: personal note
+            if(m.role==="loading-personal") return (
+              <div key={i} className="loading fade"><div className="spin"/><span>Personalising for you...</span></div>
+            );
+            if(m.role==="recap") return <RecapBox key={i} items={m.items} sources={m.sources}/>;
+            if(m.role==="foryou") return <ForYouBox key={i} items={m.items} covers={m.covers} sources={m.sources}/>;
             // Doc answer — collapsible
             if(m.role==="doc") return (
               <div key={i} className="fade" style={{marginBottom:20}}>
@@ -532,6 +558,7 @@ Give a clear explanation with a practical real-world example.`,
           <div style={{fontSize:20,fontWeight:800,marginBottom:8,marginTop:12,color:"var(--t1)"}}>{score>=80?"Excellent work! 🎉":score>=60?"Good effort! 📚":"Keep practising! 💪"}</div>
           <div className="ts t3 mb24 tm">Updated mastery: <span style={{color:ME.getLevel(subject.mastery[cId]||0).color,fontWeight:700}}>{subject.mastery[cId]||0}%</span>{" · "}{(subject.mastery[cId]||0)>=MASTERY_THRESHOLD?"Concept Mastered ✓":"Needs more practice"}</div>
           <NotedLine noted={noted}/>
+          <TargetedReview items={quizReview}/>
           <div className="mb24"/>
           <div className="f g12 jc">
             <button className="btn btn-secondary" onClick={()=>setPhase("explain")}>Review Lesson</button>

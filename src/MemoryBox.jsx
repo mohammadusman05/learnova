@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getMemory, studyHistory, removeQuestion, removeMistake, clearChat, memorySummary, RECURRING, FIX_AFTER } from './learnerMemory.js';
+import { isPersonalised, setPersonalised } from './personalise.js';
 
 // ============================================================
 // TA points 14–15 — "What Learnova remembers" box and the earlier conversation, shown on each concept
@@ -164,4 +165,57 @@ export const ChatNoted = ({ noted }) => !noted ? null : (
   <div className="chat-noted" style={{ marginTop: 8, fontSize: 11, color: "#7c3aed", fontFamily: "var(--mono)" }}>
     📝 Learnova noted: {noted.text}{noted.isNew ? "" : noted.reopened ? " — back again" : ` — seen ${noted.count}×`}
   </div>
+);
+
+// ============================================================
+// TA point 16 — personalisation pieces
+// ============================================================
+// On/off switch (per subject). Off = the tutor treats every learner the same (for adaptive vs non-adaptive comparisons).
+export const PersonalisationSwitch = ({ subject, onChange }) => {
+  const on = isPersonalised(subject);
+  return (
+    <button className="btn btn-secondary btn-xs personalisation-switch" title={on ? "The tutor uses what it remembers about you. Turn off to compare with a non-personalised tutor." : "The tutor treats every learner the same. Turn on to use what it remembers about you."}
+      onClick={() => onChange && onChange(setPersonalised(subject, !on))}
+      style={{ borderColor: on ? "#c4b5fd" : "var(--b1)", color: on ? "#7c3aed" : "var(--t3)", background: on ? "#faf8ff" : "var(--s3)" }}>
+      🎯 Personalisation: <b>{on ? "ON" : "OFF"}</b>
+    </button>
+  );
+};
+
+const srcLine = (sources) => sources?.length ? <div className="txs t4" style={{ marginTop: 6 }}>Sources: {sources.map(x => `[${x.tag}] ${x.label}`).join(" · ")}</div> : null;
+
+// "Quick recap" of weak prerequisites, shown before the explanation
+export const RecapBox = ({ items, sources }) => (
+  <div className="recap-box fade" style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 10, background: "#fffbeb", border: "1px solid #fde68a" }}>
+    {items.map((r, i) => (
+      <div key={i} style={{ marginTop: i ? 10 : 0 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", letterSpacing: "1.5px", color: "#b45309", marginBottom: 4 }}>📌 QUICK RECAP: {r.name.toUpperCase()} ({r.mastery}%)</div>
+        <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--t1)" }}>{r.text}</div>
+      </div>
+    ))}
+    {srcLine(sources)}
+  </div>
+);
+
+// "For you" note, shown before the explanation
+export const ForYouBox = ({ items, covers, sources }) => (
+  <div className="for-you-box fade" style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 10, background: "#faf8ff", border: "1px solid #ddd6fe" }}>
+    <div className="f ac jb" style={{ gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", letterSpacing: "1.5px", color: "#7c3aed" }}>🎯 FOR YOU</div>
+      {covers?.length > 0 && <div className="tag" style={{ fontSize: 9, background: "#ede9fe", color: "#6d28d9", borderColor: "#c4b5fd", whiteSpace: "normal" }}>Personalised for you: covers your mix-up about {covers.join("; ")}</div>}
+    </div>
+    {items.map((t, i) => <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: "var(--t1)", marginTop: 2 }}>• {t}</div>)}
+    {srcLine(sources)}
+  </div>
+);
+
+// After a quiz: which questions checked an earlier mix-up
+export const TargetedReview = ({ items }) => !items?.length ? null : (
+  <div className="targeted-review" style={{ margin: "12px auto 0", maxWidth: 640, textAlign: "left", padding: "10px 14px", borderRadius: 10, background: "#fff", border: "1px solid #ddd6fe", fontSize: 13, color: "var(--t2)", lineHeight: 1.6 }}>
+    <div style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--mono)", letterSpacing: "1.5px", color: "#7c3aed", marginBottom: 4 }}>🎯 QUESTIONS THAT CHECKED YOUR EARLIER MIX-UPS</div>
+    {items.map((x, i) => <div key={i}>Q{x.n} {x.correct ? "✓" : "✗"} — {x.targetText}</div>)}
+  </div>
+);
+export const TargetTag = ({ text }) => !text ? null : (
+  <div className="target-tag txs" style={{ marginTop: 8, color: "#7c3aed", fontFamily: "var(--mono)" }}>🎯 This question checked your earlier mix-up: {text}</div>
 );

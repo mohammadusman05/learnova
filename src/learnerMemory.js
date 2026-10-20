@@ -83,8 +83,10 @@ Include every answer id exactly once.`;
 export const analyseAnswers = async (callClaude, concept, { wrong = [], right = [] }, known = []) => {
   const open = known.filter(k => k.status !== "fixed");
   if (!wrong.length && !(right.length && open.length)) return { perWrong: [], corrections: [] };
+  // point 16: a question written to check a known mistake says so, which makes "fixed" reliable
+  const checks = (w) => { const k = w.targetId ? known.findIndex(x => x.id === w.targetId) : -1; return k >= 0 ? `\n    Written to check known mistake m${k + 1}` : ""; };
   const fmt = (list, p) => list.map((w, i) =>
-    `${p}${i + 1}: Question: ${oneLine(w.question)}\n    Learner answered: ${oneLine(w.answer, 600)}${p === "w" ? `\n    Correct answer: ${oneLine(w.correct, 400)}` : ""}${w.explanation && p === "w" ? `\n    Why: ${oneLine(w.explanation)}` : ""}`).join("\n");
+    `${p}${i + 1}: Question: ${oneLine(w.question)}\n    Learner answered: ${oneLine(w.answer, 600)}${p === "w" ? `\n    Correct answer: ${oneLine(w.correct, 400)}` : ""}${w.explanation && p === "w" ? `\n    Why: ${oneLine(w.explanation)}` : ""}${checks(w)}`).join("\n");
   const usr = `Concept: "${concept?.name}" — ${oneLine(concept?.definition)}\n\nKNOWN mistakes of this learner:\n${knownList(known)}\n\nWRONG answers:\n${wrong.length ? fmt(wrong, "w") : "(none)"}\n\nRIGHT answers:\n${right.length ? fmt(right, "r") : "(none)"}`;
   const parsed = await askJSON(callClaude, ANSWERS_PROMPT, usr, p => Array.isArray(p.mistakes) || Array.isArray(p.corrections));
   const byW = Object.fromEntries((parsed.mistakes || []).map(x => [x?.answer, x]));

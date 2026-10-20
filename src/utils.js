@@ -104,7 +104,7 @@ const subjectAvg = (subject) => {
 // ============================================================
 // ANSWER LOG EXPORT (TA point 9) — one row per answer, for checking mastery reliability
 // ============================================================
-const ANSWER_LOG_COLUMNS = ["subject","concept_id","concept_name","question","correct","answer_type","screen","question_source","date_time","mastery_before","mastery_after","picked_answer","misconception"]; // last 2: point 14
+const ANSWER_LOG_COLUMNS = ["subject","concept_id","concept_name","question","correct","answer_type","screen","question_source","date_time","mastery_before","mastery_after","picked_answer","misconception","personalised","targeted_mistake"]; // point 14: picked_answer, misconception · point 16: personalised, targeted_mistake
 const csvCell = (v) => {
   const s = v===undefined||v===null ? "" : String(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
@@ -114,6 +114,7 @@ const answerLogCsv = (subject) => {
     subject.name, e.conceptId, subject.graph?.nodes?.[e.conceptId]?.name || "", e.question,
     e.correct ? 1 : 0, e.type, e.screen, e.questionSource || "general", e.at ? new Date(e.at).toISOString() : "", e.masteryBefore, e.masteryAfter,
     e.picked ?? "", e.misconception ?? "",
+    e.personalised === undefined ? "" : (e.personalised ? "yes" : "no"), e.targetedMistake ?? "",
   ]);
   return [ANSWER_LOG_COLUMNS, ...rows].map(r => r.map(csvCell).join(",")).join("\r\n");
 };

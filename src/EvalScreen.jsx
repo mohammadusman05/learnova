@@ -3,7 +3,8 @@ import { ME, exJSON, MASTERY_THRESHOLD, applyAnswers } from './utils.js';
 import { conceptDocIds } from './conceptExtraction.js';
 import { retrieve, passagesForPrompt } from './retrieval.js';
 import { getMemory, analyseAnswers, applyAnalysis } from './learnerMemory.js';
-import { NotedLine } from './MemoryBox.jsx';
+import { NotedLine, PersonalisationSwitch, TargetTag } from './MemoryBox.jsx';
+import { isPersonalised, targetBlock, resolveTargets } from './personalise.js';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
   return (
@@ -79,6 +80,7 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
   const [selectedConcept, setSelectedConcept] = useState(initialConceptId || null);
   const [config, setConfig] = useState({ type:"mcq", difficulty:"medium", mcqCount:10, descCount:3, source:"lecture" });
   const [usedSource, setUsedSource] = useState("general"); // point 11: where this quiz's questions actually came from
+  const [usedPersonalised, setUsedPersonalised] = useState(false); // point 16: was this quiz personalised
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(false);
@@ -120,6 +122,10 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
       else source = "general";
     }
     setUsedSource(source);
+    // TA point 16: up to 3 questions aim at the learner's open mistakes (when personalisation is on)
+    const wantMcq = config.type === "mcq" || config.type === "combo";
+    const tb = targetBlock(subjRef.current, c.id, 3, wantMcq ? "mcq" : "desc");
+    setUsedPersonalised(isPersonalised(subjRef.current));
 
     let qs = [];
 
@@ -131,11 +137,11 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
 {"questions":[{"q":"Question?","options":["A) ...","B) ...","C) ...","D) ..."],"correct":0,"explanation":"Why A is correct"}]}`,
         `Generate ${n} ${diffStr} MCQ questions about: "${c.name}" — ${c.definition}
 Subject: ${subject.name}
-Difficulty: ${config.difficulty}${lectureBlock}`
+Difficulty: ${config.difficulty}${lectureBlock}${tb.text}`
       , 4000);
       const parsed = exJSON(raw);
       if(parsed?.questions) {
-        parsed.questions.slice(0,n).forEach((q,i) => qs.push({...q, id:`mcq_${i}`, type:"mcq"}));
+        resolveTargets(parsed.questions.slice(0,n), tb.targets).forEach((q,i) => qs.push({...q, id:`mcq_${i}`, type:"mcq"}));
       }
     }
 
@@ -147,11 +153,11 @@ Difficulty: ${config.difficulty}${lectureBlock}`
 {"questions":[{"q":"Question requiring a written explanation?","sampleAnswer":"A thorough sample answer","keyPoints":["key point 1","key point 2"]}]}`,
         `Generate ${n} ${diffStr} descriptive questions about: "${c.name}" — ${c.definition}
 Subject: ${subject.name}
-Difficulty: ${config.difficulty}${lectureBlock}`
+Difficulty: ${config.difficulty}${lectureBlock}${wantMcq ? "" : tb.text}`
       , 3000);
       const parsed = exJSON(raw);
       if(parsed?.questions) {
-        parsed.questions.slice(0,n).forEach((q,i) => qs.push({...q, id:`desc_${i}`, type:"desc"}));
+        (wantMcq ? parsed.questions.slice(0,n) : resolveTargets(parsed.questions.slice(0,n), tb.targets)).forEach((q,i) => qs.push({...q, id:`desc_${i}`, type:"desc"}));
       }
     }
 
@@ -248,7 +254,7 @@ ${JSON.stringify(gradingInput)}`
     const old = subject.mastery[selectedConcept] || 0;
     const { mastery: nw, steps } = applyAnswers(old, graded.map(r => ({ correct: !!r.isCorrect, type: r.type === "desc" ? "desc" : "mcq" })));
     const at = Date.now();
-    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, picked: graded[i].userAnswer, correct: s.correct, type: s.type, screen: "evaluation", questionSource: usedSource, at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
+    const log = steps.map((s, i) => ({ conceptId: selectedConcept, question: graded[i].q, picked: graded[i].userAnswer, correct: s.correct, type: s.type, screen: "evaluation", questionSource: usedSource, personalised: usedPersonalised, targetedMistake: graded[i].targetText || "", at, masteryBefore: s.masteryBefore, masteryAfter: s.masteryAfter }));
     const newMastery = {...subject.mastery, [selectedConcept]: nw};
     const newGraph = {...subject.graph, nodes:{...subject.graph.nodes,[selectedConcept]:{...subject.graph.nodes[selectedConcept],state: nw>=MASTERY_THRESHOLD?"MASTERED":"LEARNING"}}};
 
@@ -258,7 +264,7 @@ ${JSON.stringify(gradingInput)}`
     setLoading(false);
 
     // TA points 14–15: wrong answers → mistakes to remember; right answers → can fix open mistakes (after the results are shown)
-    const asItem = r => ({ question: r.q, answer: r.userAnswer, correct: r.correctAnswer || "", explanation: r.feedback || "", screen: "evaluation" });
+    const asItem = r => ({ question: r.q, answer: r.userAnswer, correct: r.correctAnswer || "", explanation: r.feedback || "", screen: "evaluation", targetId: r.targetId });
     const wrong = graded.filter(r => !r.isCorrect && r.userAnswer && r.userAnswer !== "Not answered").map(asItem);
     const right = graded.filter(r => r.isCorrect).map(asItem);
     const cIdNow = selectedConcept;
@@ -374,6 +380,10 @@ ${JSON.stringify(gradingInput)}`
             const choice = hasDocs ? config.source : "general";
             return (
               <div className="mb16">
+                <div className="f ac jb mb8" style={{gap:8,flexWrap:"wrap"}}>
+                  <div className="txs t3 tm">Personalised questions aim at your open mistakes.</div>
+                  <PersonalisationSwitch subject={subject} onChange={commit}/>
+                </div>
                 <div className="card-label">QUESTION SOURCE</div>
                 <div className="f g8">
                   {[{id:"lecture",label:"📄 From my lecture",color:"#2563eb",disabled:!hasDocs},{id:"general",label:"🧠 From general knowledge",color:"#ff6f61",disabled:false}].map(s => (
@@ -593,6 +603,7 @@ ${JSON.stringify(gradingInput)}`
               <div style={{fontSize:9,letterSpacing:"1.5px",color:"#d97706",fontFamily:"var(--mono)",fontWeight:700,marginBottom:4}}>💡 EXPLANATION</div>
               <div style={{fontSize:13,color:"var(--t2)",lineHeight:1.6}}>{r.feedback}</div>
             </div>
+            <TargetTag text={r.targetText}/>
           </div>
         ))}
       </div>
