@@ -1,7 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ME, MASTERY_THRESHOLD } from './utils.js';
+import { ME, MASTERY_THRESHOLD, answerLogCsv } from './utils.js';
 const LibraryScreen = ({ subject }) => {
   const docs = subject.docs || [];
+  const answerCount = (subject.answerLog || []).length;
+
+  // TA point 9: download every saved answer (Study + Evaluation) as a CSV file
+  const downloadAnswerLog = () => {
+    const csv = "﻿" + answerLogCsv(subject); // BOM so Excel shows symbols correctly
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = (subject.name || "subject").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    a.href = url;
+    const d = new Date(); // local date, so the file name matches the user's own day
+    const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    a.download = `learnova-answers-${slug}-${ymd}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
   const fmtDate = (ts) => {
     const d = new Date(ts);
@@ -96,6 +112,21 @@ const LibraryScreen = ({ subject }) => {
           </div>
         </div>
       )}
+
+      {/* Answer log export */}
+      <div className="card mt16">
+        <div className="f ac jb" style={{gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div className="card-label" style={{margin:0}}>ANSWER LOG</div>
+            <div className="txs t3 tm" style={{marginTop:4}}>
+              {answerCount>0
+                ? `${answerCount} answer${answerCount!==1?"s":""} saved from Study and Evaluation`
+                : "No answers yet — answers are saved when quizzes and evaluations are submitted"}
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={downloadAnswerLog} disabled={answerCount===0}>⬇ Download CSV</button>
+        </div>
+      </div>
     </div>
   );
 };
