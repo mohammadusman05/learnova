@@ -1,10 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ME, MASTERY_THRESHOLD, answerLogCsv } from './utils.js';
+import { faithCsv, faithSummary } from './faithfulness.js';
 const LibraryScreen = ({ subject }) => {
   const docs = subject.docs || [];
   const answerCount = (subject.answerLog || []).length;
 
   // TA point 9: download every saved answer (Study + Evaluation) as a CSV file
+  // TA point 19: download every lecture check (explanations, chat answers, quiz answer keys)
+  const fs = faithSummary(subject);
+  const downloadFaith = () => {
+    const blob = new Blob(["\uFEFF" + faithCsv(subject)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = (subject.name || "subject").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const d = new Date();
+    a.href = url; a.download = `learnova-faithfulness-${slug}-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const downloadAnswerLog = () => {
     const csv = "﻿" + answerLogCsv(subject); // BOM so Excel shows symbols correctly
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -125,6 +138,21 @@ const LibraryScreen = ({ subject }) => {
             </div>
           </div>
           <button className="btn btn-secondary btn-sm" onClick={downloadAnswerLog} disabled={answerCount===0}>⬇ Download CSV</button>
+        </div>
+      </div>
+
+      {/* Lecture checks (TA point 19) */}
+      <div className="card mt16 faith-card">
+        <div className="f ac jb" style={{gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div className="card-label" style={{margin:0}}>LECTURE CHECKS (TUTOR FAITHFULNESS)</div>
+            <div className="txs t3 tm" style={{marginTop:4}}>
+              {fs.answers || fs.quizzes
+                ? `${fs.answers} answer${fs.answers!==1?"s":""} checked${fs.avgScore!==null?` · on average ${fs.avgScore}% of statements supported by the lecture`:""} · ${fs.quizzes} quiz${fs.quizzes!==1?"zes":""} with answer keys checked (${fs.corrected} corrected, ${fs.removed} removed)`
+                : "No checks yet — explanations, chat answers and lecture quizzes are checked against your lecture automatically"}
+            </div>
+          </div>
+          <button className="btn btn-secondary btn-sm download-faith" onClick={downloadFaith} disabled={!(subject.faithLog||[]).length}>⬇ Faithfulness CSV</button>
         </div>
       </div>
     </div>

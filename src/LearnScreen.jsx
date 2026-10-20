@@ -6,6 +6,8 @@ import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis,
 import { MemoryBox, EarlierChat, NotedLine, ChatNoted, PersonalisationSwitch, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
 import { LECTURE_GUARD } from './privacy.js';
+import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerSystem } from './faithfulness.js';
+import { FaithBadge, KeyCheckNote } from './FaithBadge.jsx';
 import { scheduleAfterQuiz, dueList, nextRevisionLabel, revisionTargets, getSchedule } from './revision.js';
 
 // TA point 11: list the lecture passages a reply actually cited, e.g. "[S1] L01.pdf, p.6"
@@ -43,6 +45,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
   const [quizPersonalised,setQuizPersonalised]=useState(false);
   const [revisionMode,setRevisionMode]=useState(false);       // point 17: this quiz is a revision
   const [revisionResult,setRevisionResult]=useState("");
+  const [keyNote,setKeyNote]=useState(null);                 // point 19: quiz answer keys checked against the lecture
   const subjRef=useRef(subject); subjRef.current=subject;    // newest subject, for saves that finish after a Claude call
   const commit=(updated)=>{ subjRef.current=updated; onUpdate(updated); };
   const bottomRef=useRef();
@@ -124,6 +127,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
       const wantDoc=sourceChoice.doc&&hasDocs;
       const wantKb=sourceChoice.kb||!wantDoc;   // "Document only" but no document → general knowledge, with a note
       const out=[];
+      let docPassages=[], docMsgId=null;
       // TA point 16: a personal note ("For you" + quick recap of weak prerequisites) is prepared alongside the explanation
       const notePromise=personalNote(callClaude,subjRef.current,cId,{useLecture:wantDoc}).catch(e=>({error:e.message}));
       if(sourceChoice.doc&&!hasDocs) out.push({role:"ai",note:true,content:"No uploaded document contains this concept, so this explanation uses general knowledge."});
@@ -142,7 +146,8 @@ ${passagesForPrompt(passages)}
 Explain what the lecture says about "${c.name}".`,
             1500
           );
-          out.push({role:"doc",content:docReply,docName:docNames.join(", "),sources:citedSources(passages,docReply)});
+          docPassages=passages; docMsgId=`doc_${Date.now()}`;
+          out.push({role:"doc",id:docMsgId,content:docReply,docName:docNames.join(", "),sources:citedSources(passages,docReply)});
         } else {
           out.push({role:"doc",content:`No passage in your lecture matches "${c.name}".`,docName:docNames.join(", "),sources:[]});
         }
@@ -167,6 +172,7 @@ Give a clear explanation with a practical real-world example.`,
       if(note?.forYou?.length) personal.push({role:"foryou",items:note.forYou,covers:note.covers,sources:note.forYouSources});
       if(note?.error) personal.push({role:"ai",note:true,content:`(Could not personalise this explanation: ${note.error})`});
       setMessages([...personal,...out]);
+      if(docMsgId) runCheck(docMsgId,out.find(x=>x.id===docMsgId).content,docPassages,"explanation"); // point 19
     }catch(e){setMessages([{role:"ai",content:"Error: "+e.message}]);}
     setLoading(false);
   };
@@ -185,7 +191,7 @@ Give a clear explanation with a practical real-world example.`,
       const ctx=chatContext(subjRef.current,cId,messages);
       const head=(ctx.known?`What you know about this learner:\n${ctx.known}\n\n`:"")+(ctx.convo?`Conversation so far:\n${ctx.convo}\n\n`:"");
       const reply=await callClaude(
-        `You are an AI tutor for "${subject.name}", helping a learner with "${c?.name}". Answer from the lecture passages first and cite them like [S1]. If the passages do not cover the question (or part of it), you may answer from general knowledge, but put that part after a line that starts with "Beyond your lecture:". Be clear and concise.`+CHAT_PERSONAL_RULE+" "+LECTURE_GUARD,
+        tutorAnswerSystem(subject.name,c?.name)+CHAT_PERSONAL_RULE+" "+LECTURE_GUARD,
         head+(passages.length
           ? `Lecture passages:\n${passagesForPrompt(passages)}\n\nLearner's question: ${userMsg}`
           : `No lecture passages match this question.\n\nLearner's question: ${userMsg}`),
@@ -194,6 +200,7 @@ Give a clear explanation with a practical real-world example.`,
       const sources=citedSources(passages,reply);
       const msgId=Date.now();
       setMessages(m=>[...m,{role:"ai",content:reply,sources,id:msgId}]);
+      if(passages.length) runCheck(msgId,reply,passages,"chat"); // point 19: is the answer supported by the lecture?
       commit(addChatMessages(subjRef.current,cId,[{role:"user",content:userMsg},{role:"ai",content:reply,sources}])); // point 14: chat is remembered
       checkChat(userMsg,msgId); // point 15: does the question show a misunderstanding?
     }catch(e){
@@ -235,6 +242,17 @@ Give a clear explanation with a practical real-world example.`,
     const groups=await groupMistakes(callClaude,graph.nodes[cId],open);
     commit(applyGrouping(subjRef.current,cId,groups).subject);
   };
+  // TA point 19: the judge checks each statement against the lecture pages it cites
+  const runCheck=async(msgId,text,passages,kind)=>{
+    const set=(check)=>setMessages(m=>m.map(x=>x.id===msgId?{...x,check}:x));
+    set({status:"working"});
+    try{
+      const g=await checkGrounding(callClaude,text,passages);
+      if(!g){ set(null); return; }
+      set({status:"done",result:g});
+      commit(logFaith(subjRef.current,groundingEntry(cId,kind,g)));
+    }catch(e){ set({status:"failed",error:e.message}); }
+  };
   // TA point 15: a chat question can show a misunderstanding too — noted under the reply
   const checkChat=async(question,msgId)=>{
     try{
@@ -249,9 +267,11 @@ Give a clear explanation with a practical real-world example.`,
     const c=graph.nodes[id];
     const hasDocs=!!c&&(subject.docs||[]).some(d=>conceptDocIds(c).includes(d.id));
     let source=(revision||quizSource==="lecture")&&hasDocs?"lecture":"general";
-    let lecture="";
+    let lecture="", quizPassages=[];
+    setKeyNote(null);
     if(source==="lecture"){
       const {passages}=await retrieve(subject,c,{k:5,maxChars:5000});
+      quizPassages=passages;
       if(passages.length) lecture=passagesForPrompt(passages); else source="general";
     }
     // TA point 16: up to 2 of the 3 questions aim at the learner's open mistakes (when personalisation is on)
@@ -262,7 +282,17 @@ Give a clear explanation with a practical real-world example.`,
         ? `Create 3 ${revision?"revision ":""}quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name}).\nEvery question must be about "${c?.name}" and answerable from these lecture passages only. Ignore any passage that is not about "${c?.name}".\n\n${lecture}`
         : `Create 3 ${revision?"revision ":""}quiz questions about: ${c?.name} — ${c?.definition} (Subject: ${subject.name})`)+tb.text
     );
-    const parsed=exJSON(raw);setQuiz(resolveTargets(parsed?.questions||[],tb.targets));setQuizUsedSource(source);setQuizPersonalised(isPersonalised(subjRef.current));setLoading(false);
+    const parsed=exJSON(raw);
+    let qs=resolveTargets(parsed?.questions||[],tb.targets);
+    // TA point 19: check every answer key against the lecture before the quiz is shown
+    if(source==="lecture"&&qs.length){
+      try{
+        const kc=await checkAnswerKeys(callClaude,qs,quizPassages);
+        qs=kc.questions; setKeyNote(kc);
+        if(!kc.failed) commit(logFaith(subjRef.current,{conceptId:id,kind:"quiz-keys",questionsChecked:kc.checked,corrected:kc.corrected,removed:kc.removed}));
+      }catch{ setKeyNote({failed:true}); }
+    }
+    setQuiz(qs);setQuizUsedSource(source);setQuizPersonalised(isPersonalised(subjRef.current));setLoading(false);
   };
 
   const QuizComp=()=>{
@@ -516,6 +546,7 @@ Give a clear explanation with a practical real-world example.`,
                   <div style={{padding:"16px 20px",borderRadius:"0 0 10px 10px",background:"#f8fbff",border:"1px solid #bfdbfe",borderTop:"none",fontSize:14,lineHeight:1.85,color:"var(--t1)",whiteSpace:"pre-wrap"}}>
                     {m.content}
                     <SourcesList sources={m.sources}/>
+                    <FaithBadge check={m.check}/>
                   </div>
                 )}
               </div>
@@ -555,6 +586,7 @@ Give a clear explanation with a practical real-world example.`,
                   <div style={{whiteSpace:"pre-wrap"}}>{m.content}</div>
                   <SourcesList sources={m.sources}/>
                   <ChatNoted noted={m.noted}/>
+                  <FaithBadge check={m.check}/>
                 </div>
               </div>
             );
@@ -598,7 +630,7 @@ Give a clear explanation with a practical real-world example.`,
                 <button className="btn btn-primary" onClick={generateQuiz}>Start Quiz →</button>
               </div>
             );
-          })():loading?<div className="loading"><div className="spin"/><span>Evaluation in progress — generating questions...</span></div>:<QuizComp/>}
+          })():loading?<div className="loading"><div className="spin"/><span>Evaluation in progress — generating questions...</span></div>:<><KeyCheckNote note={keyNote}/><QuizComp/></>}
         </div>
       )}
       {phase==="result"&&(

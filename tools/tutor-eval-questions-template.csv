@@ -1,0 +1,3 @@
+pdf_file,concept_name,question,answer_key
+Annot-L01-LLM-FineTuning.pdf,Attention Mechanism,What does the attention mechanism let a model do?,It lets the model focus on the most relevant words in the context when processing each word.
+Annot-L01-LLM-FineTuning.pdf,Attention Mechanism,Why might attention give a high weight to one word and a low weight to another?,

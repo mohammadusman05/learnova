@@ -7,6 +7,8 @@ import { NotedLine, PersonalisationSwitch, TargetTag } from './MemoryBox.jsx';
 import { isPersonalised, targetBlock, resolveTargets } from './personalise.js';
 import { scheduleAfterQuiz } from './revision.js';
 import { LECTURE_GUARD } from './privacy.js';
+import { checkAnswerKeys, logFaith } from './faithfulness.js';
+import { KeyCheckNote } from './FaithBadge.jsx';
 const AttemptHistory = ({ attempts }) => {
   const [expanded, setExpanded] = useState(null);
   return (
@@ -87,7 +89,8 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
-  const [noted, setNoted] = useState(null);                       // point 14: mistakes noted after an evaluation
+  const [noted, setNoted] = useState(null);
+  const [keyNote, setKeyNote] = useState(null); // point 19: MCQ answer keys checked against the lecture                       // point 14: mistakes noted after an evaluation
   const subjRef = useRef(subject); subjRef.current = subject;     // newest subject, for saves that finish after a Claude call
   const commit = (updated) => { subjRef.current = updated; onUpdate(updated); };
 
@@ -117,9 +120,11 @@ const EvalScreen = ({ subject, onUpdate, apiKey, initialConceptId, onClearConcep
     // TA point 11: questions from the lecture (RAG passages) or from general knowledge
     const hasDocs = !!c && (subject.docs||[]).some(d => conceptDocIds(c).includes(d.id));
     let source = config.source==="lecture" && hasDocs ? "lecture" : "general";
-    let lectureBlock = "";
+    let lectureBlock = "", lecturePassages = [];
+    setKeyNote(null);
     if(source==="lecture"){
       const { passages } = await retrieve(subject, c, { k:6, maxChars:6000 });
+      lecturePassages = passages;
       if(passages.length) lectureBlock = `\n\nEvery question must be about "${c.name}" and answerable from these lecture passages only. Ignore any passage that is not about "${c.name}".\n\n${passagesForPrompt(passages)}`;
       else source = "general";
     }
@@ -165,6 +170,18 @@ Difficulty: ${config.difficulty}${lectureBlock}${wantMcq ? "" : tb.text}`
       }
     }
 
+    // TA point 19: check the MCQ answer keys against the lecture before the quiz is shown
+    if (source === "lecture" && qs.some(q => q.type === "mcq")) {
+      try {
+        const mcqs = qs.filter(q => q.type === "mcq");
+        const kc = await checkAnswerKeys(callClaude, mcqs, lecturePassages);
+        const keep = new Set(kc.questions.map(q => q.id));
+        const fixed = Object.fromEntries(kc.questions.map(q => [q.id, q]));
+        qs = qs.filter(q => q.type !== "mcq" || keep.has(q.id)).map(q => q.type === "mcq" ? fixed[q.id] : q);
+        setKeyNote(kc);
+        if (!kc.failed) commit(logFaith(subjRef.current, { conceptId: c.id, kind: "quiz-keys", questionsChecked: kc.checked, corrected: kc.corrected, removed: kc.removed }));
+      } catch { setKeyNote({ failed: true }); }
+    }
     setQuestions(qs);
     setLoading(false);
   };
@@ -502,6 +519,7 @@ ${JSON.stringify(gradingInput)}`
           <div className="loading"><div className="spin"/><span>Evaluation in progress — generating questions...</span></div>
         ) : (
           <>
+            <KeyCheckNote note={keyNote}/>
             {/* MCQ Section */}
             {mcqQs.length>0 && (
               <>
