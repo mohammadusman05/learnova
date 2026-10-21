@@ -5,6 +5,7 @@ import { dueList } from './revision.js';
 import { isStatic, isPlain } from './studyMode.js';
 import { chatSummary } from './plainChat.js';
 import { StudyModeCard } from './MemoryBox.jsx';
+import { readyInOrder } from './graphView.js';
 const Dashboard = ({ subject, onNavigate, onUpdate }) => {
   const {graph,mastery}=subject;
   const concepts=Object.values(graph.nodes);
@@ -12,7 +13,7 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
   const mastered=concepts.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).length;
   const avg=total?Math.round(concepts.reduce((s,c)=>s+(mastery[c.id]||0),0)/total):0;
   const stat=isStatic(subject); // TA point 21: no suggestions or reminders in Static mode
-  const ready=stat?[]:graphEngine.getReadyConcepts(graph,mastery);
+  const ready=stat?[]:readyInOrder(subject).map(r=>r.node);   // same list as before, most useful first (same order as Study and the graph's "Next up")
   const weak=stat?[]:concepts.filter(c=>(mastery[c.id]||0)>0&&(mastery[c.id]||0)<MASTERY_THRESHOLD).sort((a,b)=>mastery[a.id]-mastery[b.id]);
   const order=graphEngine.getTopoOrder(graph);
   const due=dueList(subject); // TA point 17
@@ -21,7 +22,7 @@ const Dashboard = ({ subject, onNavigate, onUpdate }) => {
     {label:"MASTERED",value:mastered,sub:`≥ ${MASTERY_THRESHOLD}% mastery`,color:"#16a34a"},
     {label:"AVG MASTERY",value:`${avg}%`,sub:"across all concepts",color:"#263238"},
     stat?{label:"LEARNING MODE",value:"Static",sub:"the same for every learner",color:"#475569"}
-        :{label:"READY TO LEARN",value:ready.length,sub:"prerequisites cleared",color:"#e8503f"},
+        :{label:"READY TO LEARN",value:ready.length,sub:"open to study now",color:"#e8503f"},
   ];
   // TA point 22: Plain AI chat mode — no topics or mastery, just the chat and the mode switch
   if(isPlain(subject)){

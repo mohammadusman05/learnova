@@ -5,6 +5,7 @@ import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck, autoGroup, remapNoted, groupMistakes, applyGrouping } from './learnerMemory.js';
 import { MemoryBox, EarlierChat, NotedLine, ChatNoted, StudyModeTag, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
 import { isAdaptive } from './studyMode.js';
+import { readyInOrder, isConceptLocked } from './graphView.js';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
 import { LECTURE_GUARD } from './privacy.js';
 import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerSystem, filterToLecture } from './faithfulness.js';
@@ -57,7 +58,8 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
   const bottomRef=useRef();
   const msgContainerRef=useRef();
   const stat=!isAdaptive(subject);  // TA point 21: Static mode — same for every learner, no suggestions or reminders
-  const ready=stat?[]:graphEngine.getReadyConcepts(graph,mastery);
+  const ready=stat?[]:readyInOrder(subject).map(r=>r.node);   // same list as before, most useful first (same order as the graph's "Next up")
+  const readyIds=new Set(ready.map(c=>c.id));
   const due=dueList(subject); // point 17 (always empty in Static mode)
   const all=Object.values(graph.nodes);
 
@@ -422,7 +424,7 @@ Give a clear explanation with a practical real-world example.`,
           {ready.length>0&&<>
             <div className="f ac g12 mb8">
               <div className="card-label" style={{margin:0}}>⚡ READY TO LEARN</div>
-              <div style={{fontSize:11,color:"var(--t3)",fontFamily:"var(--mono)",padding:"3px 10px",background:"var(--s3)",borderRadius:20}}>prerequisites cleared — start these now</div>
+              <div style={{fontSize:11,color:"var(--t3)",fontFamily:"var(--mono)",padding:"3px 10px",background:"var(--s3)",borderRadius:20}}>open to study now</div>
             </div>
             <div className="gauto mb24">
               {ready.map(c=>{
@@ -437,23 +439,34 @@ Give a clear explanation with a practical real-world example.`,
               })}
             </div>
           </>}
-          {/* IN PROGRESS + NOT STARTED */}
-          <div className="f ac g12 mb8">
-              <div className="card-label" style={{margin:0}}>ALL CONCEPTS</div>
-              <div style={{fontSize:11,color:"var(--t3)",fontFamily:"var(--mono)",padding:"3px 10px",background:"var(--s3)",borderRadius:20}}>{stat?"every concept, in course order — the same for every learner":"every concept from your lectures"}</div>
-            </div>
-          <div className="gauto mb24">
-            {all.filter(c=>stat||(mastery[c.id]||0)<MASTERY_THRESHOLD).map(c=>{
-              const {color,label,bg,border}=ME.getLevel(mastery[c.id]||0);
-              return(
-                <div key={c.id} className="cc" onClick={()=>startLearning(c.id)}>
-                  <div className="f jb ac mb8"><div className="cc-name">{c.name}</div><div className="tag" style={{background:bg,color,borderColor:border,fontSize:9}}>{label.toUpperCase()}</div></div>
-                  <div className="cc-def">{c.definition}</div>
-                  <div className="mbar"><div className="mfill" style={{width:`${mastery[c.id]||0}%`,background:color}}/></div>
-                </div>
-              );
-            })}
-          </div>
+          {/* IN PROGRESS + NOT STARTED (Adaptive: the ready ones are already listed above, so they are not repeated) */}
+          {(()=>{
+            const rest=all.filter(c=>stat||((mastery[c.id]||0)<MASTERY_THRESHOLD&&!readyIds.has(c.id)));
+            if(!rest.length) return null;
+            return <>
+              <div className="f ac g12 mb8">
+                <div className="card-label" style={{margin:0}}>ALL CONCEPTS</div>
+                <div style={{fontSize:11,color:"var(--t3)",fontFamily:"var(--mono)",padding:"3px 10px",background:"var(--s3)",borderRadius:20}}>{stat?"every concept, in course order — the same for every learner":"every other concept from your lectures"}</div>
+              </div>
+              <div className="gauto mb24">
+                {rest.map(c=>{
+                  const {color,label,bg,border}=ME.getLevel(mastery[c.id]||0);
+                  const locked=!stat&&isConceptLocked(subject,c.id);   // display only, same as the Knowledge Graph — the card still opens
+                  return(
+                    <div key={c.id} className="cc" onClick={()=>startLearning(c.id)}>
+                      <div className="f jb ac mb8"><div className="cc-name">{c.name}</div>
+                        {locked
+                          ? <div className="tag tag-locked" title="A prerequisite is still under 60%" style={{background:"#f1f5f9",color:"#64748b",borderColor:"#cbd5e1",fontSize:9,whiteSpace:"nowrap",flexShrink:0}}>🔒 LOCKED</div>
+                          : <div className="tag" style={{background:bg,color,borderColor:border,fontSize:9}}>{label.toUpperCase()}</div>}
+                      </div>
+                      <div className="cc-def">{c.definition}</div>
+                      <div className="mbar"><div className="mfill" style={{width:`${mastery[c.id]||0}%`,background:color}}/></div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>;
+          })()}
 
           {/* COMPLETED SECTION — at bottom */}
           {!stat&&all.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).length>0&&(
