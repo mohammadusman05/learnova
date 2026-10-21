@@ -160,6 +160,21 @@ export const buildGraphView = (subject, { docId = null, adaptive = true } = {}) 
   return { concepts, rows, layerOf, maxLayer, info, nextUp, nextName: nextUp ? nodes[nextUp.id].name : "", feeds, counts, needsAll, adaptive };
 };
 
+/**
+ * Soft lock (Study): what a locked concept is still waiting for, and where to start.
+ * → {locked:false} or {locked:true, id, name, needs:[{id,name,score}], startWith:{id,name}|null}
+ * startWith = the first concept on the way there that can be studied now (same order as "Ready to learn").
+ */
+export const lockInfo = (subject, id) => {
+  const v = buildGraphView(subject, { adaptive: true });
+  const i = v.info[id];
+  if (!i || !i.locked) return { locked: false };
+  const needs = i.prereqs.filter(p => !p.cleared).map(({ id: pid, name, score }) => ({ id: pid, name, score }));
+  const before = v.needsAll(id);
+  const first = readyInOrder(subject).find(r => r.node.id !== id && before.has(r.node.id));
+  return { locked: true, id, name: i.name, needs, startWith: first ? { id: first.node.id, name: first.node.name } : null };
+};
+
 /** filter chip → does this concept show? */
 export const matchesFilter = (i, filter) =>
   filter === "all" ? true : filter === "notLinked" ? i.notLinked : i.status === filter;

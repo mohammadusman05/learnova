@@ -5,7 +5,7 @@ import { retrieve, passagesForPrompt, sourcesOf } from './retrieval.js';
 import { getMemory, noteStudied, addChatMessages, analyseAnswers, applyAnalysis, checkChatQuestion, applyChatCheck, autoGroup, remapNoted, groupMistakes, applyGrouping } from './learnerMemory.js';
 import { MemoryBox, EarlierChat, NotedLine, ChatNoted, StudyModeTag, RecapBox, ForYouBox, TargetedReview } from './MemoryBox.jsx';
 import { isAdaptive } from './studyMode.js';
-import { readyInOrder, isConceptLocked } from './graphView.js';
+import { readyInOrder, isConceptLocked, lockInfo, listNames } from './graphView.js';
 import { isPersonalised, personalNote, chatContext, CHAT_PERSONAL_RULE, targetBlock, resolveTargets } from './personalise.js';
 import { LECTURE_GUARD } from './privacy.js';
 import { checkGrounding, checkAnswerKeys, logFaith, groundingEntry, tutorAnswerSystem, filterToLecture } from './faithfulness.js';
@@ -69,7 +69,7 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
   const updateMastery=(id,val)=>{ onUpdate({...subject,mastery:{...subject.mastery,[id]:val}}); };
   const updateGraph=(newGraph)=>{ onUpdate({...subject,graph:newGraph}); };
 
-  useEffect(()=>{if(initialId){ if(initialMode==="revise") startRevision(initialId); else startLearning(initialId); }},[]);
+  useEffect(()=>{if(initialId){ if(initialMode==="revise") startRevision(initialId); else openConcept(initialId); }},[]);
   // ...
 
   // ...
@@ -109,6 +109,13 @@ const LearnScreen = ({ subject, onUpdate, initialId, initialMode, apiKey, onGoTo
     }
   },[messages, docCollapsed, kbCollapsed]);
 
+  // Soft lock (Adaptive only): a concept whose prerequisites are under 60% asks first — "Study X first" or "Open anyway".
+  // Nothing is blocked: the learner can always open it.
+  const [lockAsk,setLockAsk]=useState(null);
+  const openConcept=(id)=>{
+    if(!stat){ const li=lockInfo(subject,id); if(li.locked){ setPhase("select"); setLockAsk(li); return; } }
+    startLearning(id);
+  };
   const startLearning=async(id)=>{
     const c=graph.nodes[id];if(!c) return;
     setCId(id);setPhase("explain");setMessages([]);setLoading(false);
@@ -430,7 +437,7 @@ Give a clear explanation with a practical real-world example.`,
               {ready.map(c=>{
                 const {color,label,bg,border}=ME.getLevel(mastery[c.id]||0);
                 return(
-                  <div key={c.id} className="cc" onClick={()=>startLearning(c.id)}>
+                  <div key={c.id} className="cc" onClick={()=>openConcept(c.id)}>
                     <div className="f jb ac mb8"><div className="cc-name">{c.name}</div><div className="tag tag-coral">READY</div></div>
                     <div className="cc-def">{c.definition}</div>
                     <div className="mbar"><div className="mfill" style={{width:`${mastery[c.id]||0}%`,background:"#ff6f61"}}/></div>
@@ -453,7 +460,7 @@ Give a clear explanation with a practical real-world example.`,
                   const {color,label,bg,border}=ME.getLevel(mastery[c.id]||0);
                   const locked=!stat&&isConceptLocked(subject,c.id);   // display only, same as the Knowledge Graph — the card still opens
                   return(
-                    <div key={c.id} className="cc" onClick={()=>startLearning(c.id)}>
+                    <div key={c.id} className="cc" onClick={()=>openConcept(c.id)}>
                       <div className="f jb ac mb8"><div className="cc-name">{c.name}</div>
                         {locked
                           ? <div className="tag tag-locked" title="A prerequisite is still under 60%" style={{background:"#f1f5f9",color:"#64748b",borderColor:"#cbd5e1",fontSize:9,whiteSpace:"nowrap",flexShrink:0}}>🔒 LOCKED</div>
@@ -479,7 +486,7 @@ Give a clear explanation with a practical real-world example.`,
                 {all.filter(c=>(mastery[c.id]||0)>=MASTERY_THRESHOLD).map(c=>{
                   const {color,bg,border}=ME.getLevel(mastery[c.id]||0);
                   return(
-                    <div key={c.id} className="cc" onClick={()=>startLearning(c.id)} style={{borderColor:"#86efac",background:"#f0fdf4"}}>
+                    <div key={c.id} className="cc" onClick={()=>openConcept(c.id)} style={{borderColor:"#86efac",background:"#f0fdf4"}}>
                       <div className="f jb ac mb8">
                         <div className="cc-name">{c.name}</div>
                         <div className="tag tag-green">MASTERED</div>
@@ -494,6 +501,25 @@ Give a clear explanation with a practical real-world example.`,
           )}
         </>
       }
+      {lockAsk&&(
+        <div className="modal-overlay" onClick={()=>setLockAsk(null)}>
+          <div className="modal lock-ask" onClick={e=>e.stopPropagation()}>
+            <div className="modal-title">🔒 {lockAsk.name} is locked</div>
+            <div className="ts t2" style={{lineHeight:1.7,marginBottom:6}}>
+              It needs {listNames(lockAsk.needs.map(n=>`${n.name} (${n.score}%)`))} at 60% first.
+            </div>
+            {lockAsk.startWith&&!lockAsk.needs.some(n=>n.id===lockAsk.startWith.id)&&(
+              <div className="ts t3" style={{lineHeight:1.7,marginBottom:6}}>The way there starts with <b>{lockAsk.startWith.name}</b>.</div>
+            )}
+            <div className="txs t3 tm" style={{marginBottom:20}}>You can still open it now if you already know the basics.</div>
+            <div className="f fw g8">
+              {lockAsk.startWith&&<button className="btn btn-primary lock-study-first" onClick={()=>{const id=lockAsk.startWith.id;setLockAsk(null);startLearning(id);}}>Study {lockAsk.startWith.name} first</button>}
+              <button className="btn btn-secondary lock-open-anyway" onClick={()=>{const id=lockAsk.id;setLockAsk(null);startLearning(id);}}>Open anyway</button>
+              <button className="btn btn-ghost lock-cancel" onClick={()=>setLockAsk(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
